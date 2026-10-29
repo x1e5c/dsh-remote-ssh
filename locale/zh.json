@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "远程 SSH",
+    "description": "通过 SSH 在远程机器上运行 dsh，并在本地隧道窗口中打开远程工作区。"
+  }
+}

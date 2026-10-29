@@ -1,0 +1,64 @@
+{
+  "name": "dsh-remote-ssh",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Remote SSH workspaces inside DSH: local agent/session/approvals, remote fs/shell/jobs/terminal.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./remote-tools": "./remote-tools.js",
+    "./remote-fs": "./remote-fs.js",
+    "./remote-fs-approval": "./remote-fs-approval.js",
+    "./remote-shell": "./remote-shell.js",
+    "./remote-tool-restrict": "./remote-tool-restrict.js",
+    "./remote-context": "./remote-context.js",
+    "./remote-terminal": "./remote-terminal.js",
+    "./remote-terminal-host": "./remote-terminal-host.js",
+    "./remote-terminal-multi": "./remote-terminal-multi.js",
+    "./remote-terminal-types": "./remote-terminal-types.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "remote-tools.js",
+    "remote-fs.js",
+    "remote-fs-approval.js",
+    "remote-shell.js",
+    "remote-tool-restrict.js",
+    "remote-context.js",
+    "remote-terminal.js",
+    "remote-terminal-host.js",
+    "remote-terminal-multi.js",
+    "remote-terminal-types.js",
+    "lib/remote.js",
+    "lib/controller.js",
+    "lib/proxy.js",
+    "lib/mirror.js",
+    "lib/remote-api.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-workspace"
+      ]
+    }
+  }
+}

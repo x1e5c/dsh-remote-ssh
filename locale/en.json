@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Remote SSH",
+    "description": "Run dsh on remote machines over SSH and open remote workspaces through a tunneled dsh Web window."
+  }
+}

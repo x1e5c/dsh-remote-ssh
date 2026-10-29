@@ -1,0 +1,330 @@
+# Remote SSH bundle patch.
+# The row loads index.js as the Cordis Host half; package.json's dsh.client
+# declaration loads client.js into the Web UI.
+- insert:
+    - id: remote-ssh
+      name: dsh-remote-ssh
+    - id: preset-remote-standard
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: remote-standard
+        name: Remote Standard
+        description: Standard local agent preset with fs, search, bash, jobs, skills, planning, compaction, and delegation executed over the session's remote SSH workspace.
+        order: 60
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                You are a coding agent operating on the remote SSH workspace configured
+                for this session. Filesystem, search, bash, jobs, and terminal tools run
+                on the remote host; never use local filesystem paths. The remote workspace
+                is resolved from the session, not from this preset.
+          - id: remote-context
+            name: 'dsh-remote-ssh/remote-context'
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: remote-tool-restrict
+            name: 'dsh-remote-ssh/remote-tool-restrict'
+          - id: remote-fs-realm
+            name: cordis:group
+            group: true
+            isolate:
+              fs: true
+              shell: true
+            config:
+              - id: remote-fs
+                name: 'dsh-remote-ssh/remote-fs'
+              - id: remote-shell
+                name: 'dsh-remote-ssh/remote-shell'
+              - id: tool-fs
+                name: '@deepseek-ai/dsh-tool-fs'
+              - id: tool-fs-search
+                name: '@deepseek-ai/dsh-tool-fs-search'
+                config:
+                  sampleOverCapGlobResults: false
+              - id: remote-fs-approval
+                name: 'dsh-remote-ssh/remote-fs-approval'
+              - id: tool-bash
+                name: '@deepseek-ai/dsh-tool-bash'
+              - id: tool-jobs
+                name: '@deepseek-ai/dsh-tool-jobs'
+          - id: tool-schedule
+            name: '@deepseek-ai/dsh-tool-schedule'
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: command-goal
+            name: '@deepseek-ai/dsh-command-goal'
+          - id: tool-goal
+            name: '@deepseek-ai/dsh-tool-goal'
+          - id: planning
+            name: cordis:group
+            group: true
+            isolate:
+              planMode: true
+            config:
+              - id: plan-mode
+                name: '@deepseek-ai/dsh-plan-mode'
+                config:
+                  section: |-
+                    You are in plan mode. Explore first, do not edit or write files, and present a complete plan through exit_plan_mode before implementation.
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+          - id: delegation
+            name: cordis:group
+            group: true
+            isolate:
+              workflowEngine: true
+            config:
+              - id: tool-subagent-control
+                name: '@deepseek-ai/dsh-tool-subagent-control'
+              - id: tool-subagent
+                name: '@deepseek-ai/dsh-tool-subagent'
+                config:
+                  provider: spawn
+                  toolName: subagent
+                  modelSelectionSettings: true
+              - id: tool-subagent-fork
+                name: '@deepseek-ai/dsh-tool-subagent'
+                config:
+                  provider: fork
+                  toolName: subagent_fork
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: present
+            name: '@deepseek-ai/dsh-tool-present'
+          - id: tool-plugin-manager
+            name: '@deepseek-ai/dsh-plugin-manager/tools'
+            disabled: true
+          - id: tool-plugin-market
+            name: '@deepseek-ai/dsh-plugin-market/tools'
+            disabled: true
+    - id: preset-remote-ptc
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: remote-ptc
+        name: Remote PTC
+        description: PTC-style local agent preset with remote SSH fs, shell, jobs, presentation, planning, compaction, and delegation.
+        order: 61
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                You are a coding agent operating on the remote SSH workspace configured
+                for this session. Filesystem, search, bash, jobs, and terminal tools run
+                on the remote host; never use local filesystem paths. The remote workspace
+                is resolved from the session, not from this preset.
+          - id: remote-context
+            name: 'dsh-remote-ssh/remote-context'
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: remote-tool-restrict
+            name: 'dsh-remote-ssh/remote-tool-restrict'
+          - id: remote-fs-realm
+            name: cordis:group
+            group: true
+            isolate:
+              fs: true
+              shell: true
+            config:
+              - id: remote-fs
+                name: 'dsh-remote-ssh/remote-fs'
+              - id: remote-shell
+                name: 'dsh-remote-ssh/remote-shell'
+              - id: tool-fs
+                name: '@deepseek-ai/dsh-tool-fs'
+              - id: tool-fs-search
+                name: '@deepseek-ai/dsh-tool-fs-search'
+                config:
+                  sampleOverCapGlobResults: false
+              - id: remote-fs-approval
+                name: 'dsh-remote-ssh/remote-fs-approval'
+              - id: tool-bash
+                name: '@deepseek-ai/dsh-tool-bash'
+              - id: tool-jobs
+                name: '@deepseek-ai/dsh-tool-jobs'
+          - id: tool-schedule
+            name: '@deepseek-ai/dsh-tool-schedule'
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: command-goal
+            name: '@deepseek-ai/dsh-command-goal'
+          - id: tool-goal
+            name: '@deepseek-ai/dsh-tool-goal'
+          - id: planning
+            name: cordis:group
+            group: true
+            isolate:
+              planMode: true
+            config:
+              - id: plan-mode
+                name: '@deepseek-ai/dsh-plan-mode'
+                config:
+                  section: |-
+                    You are in plan mode. Explore first, do not edit or write files, and present a complete plan through exit_plan_mode before implementation.
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+          - id: delegation
+            name: cordis:group
+            group: true
+            isolate:
+              workflowEngine: true
+            config:
+              - id: tool-subagent-control
+                name: '@deepseek-ai/dsh-tool-subagent-control'
+              - id: tool-subagent
+                name: '@deepseek-ai/dsh-tool-subagent'
+                config:
+                  provider: spawn
+                  toolName: subagent
+                  modelSelectionSettings: true
+              - id: tool-subagent-fork
+                name: '@deepseek-ai/dsh-tool-subagent'
+                config:
+                  provider: fork
+                  toolName: subagent_fork
+              - id: workflow-ptc
+                name: '@deepseek-ai/dsh-workflow-ptc'
+                disabled: true
+              - id: tool-workflow
+                name: '@deepseek-ai/dsh-tool-workflow'
+                disabled: true
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: tool-presentation
+            name: '@deepseek-ai/dsh-agent-tool-presentation'
+            config:
+              mode: ptc
+          - id: present
+            name: '@deepseek-ai/dsh-tool-present'
+          - id: tool-plugin-manager
+            name: '@deepseek-ai/dsh-plugin-manager/tools'
+            disabled: true
+          - id: tool-plugin-market
+            name: '@deepseek-ai/dsh-plugin-market/tools'
+            disabled: true
+    - id: preset-remote-minimal
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: remote-minimal
+        name: Remote Minimal
+        description: Minimal local agent preset with remote SSH fs and shell only.
+        order: 62
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                You are a helpful software engineer assistant working on a remote SSH
+                workspace. Filesystem and bash tools run on the remote host; never use
+                local paths.
+              complete: true
+              includeRuntimeContext: false
+          - id: remote-context
+            name: 'dsh-remote-ssh/remote-context'
+          - id: remote-tool-restrict
+            name: 'dsh-remote-ssh/remote-tool-restrict'
+          - id: remote-fs-realm
+            name: cordis:group
+            group: true
+            isolate:
+              fs: true
+              shell: true
+            config:
+              - id: remote-fs
+                name: 'dsh-remote-ssh/remote-fs'
+              - id: remote-shell
+                name: 'dsh-remote-ssh/remote-shell'
+              - id: tool-fs
+                name: '@deepseek-ai/dsh-tool-fs'
+                config:
+                  read: false
+                  readImage: true
+                  write: false
+                  edit: false
+              - id: tool-bash
+                name: '@deepseek-ai/dsh-tool-bash'
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+
+- id: optional-persistent-terminals
+  name: cordis:group
+  group: true
+  isolate:
+    terminals: true
+  config:
+    - id: optional-terminal-registry
+      name: '@deepseek-ai/dsh-terminal'
+    - id: optional-terminal-bash
+      name: '@deepseek-ai/dsh-terminal-bash'
+      disabled: !!js process.platform === 'win32'
+    - id: optional-terminal-pwsh
+      name: '@deepseek-ai/dsh-terminal-bash'
+      disabled: !!js process.platform !== 'win32'
+      config:
+        shellDialect: pwsh
+    - id: optional-tool-terminal
+      name: '@deepseek-ai/dsh-tool-terminal'
+    - id: remote-terminal-multi
+      name: 'dsh-remote-ssh/remote-terminal-multi'
