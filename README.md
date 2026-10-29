@@ -145,6 +145,23 @@ Remote SSH 页面提供 **沙箱日志** 按钮，显示 `sandbox=bwrap|none`、
 - 可用的 SSH alias / host；
 - 远程目录存在且可写。
 
+### 从 GitHub 安装（推荐）
+
+1. 打开 DSH **Settings → Plugins → Add plugin**；
+2. 在 **Package name or address** 中输入：
+
+   ```text
+   https://github.com/x1e5c/dsh-remote-ssh
+   ```
+
+3. 点 **Install**；
+4. 如果 profile 还没有终端 bundle，先安装 `@deepseek-ai/dsh-experimental-terminal-bundle`；
+5. 完整重启 DSH。
+
+安装器会读取仓库中的 `package.json` 和 `dsh.bundle.patch`，把 `dsh-remote-ssh` 作为 bundle 加入 profile。
+
+### 手动安装
+
 把插件作为 DSH profile 的 bundle 安装。profile 的 `dsh.profile.bundles` 中需要：
 
 ```json
