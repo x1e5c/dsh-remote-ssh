@@ -1,6 +1,7 @@
 import { posix } from 'node:path'
 import { resolveRemotePath, runRemote } from './remote-tools.js'
 import { shellQuote } from './lib/remote.js'
+import { currentRemoteWorkspace } from './lib/binding-service.js'
 
 export const name = 'remote-agent-fs'
 export const inject = []
@@ -256,7 +257,7 @@ export function createBoundRemoteFileSystem(ctx) {
   const services = new Map()
 
   function service() {
-    const binding = ctx.get('remoteSshWorkspace')?.current?.()
+    const binding = currentRemoteWorkspace(ctx)
     if (!binding || !binding.host || !binding.remotePath) {
       throw fsError(
         'No Remote Agent workspace is bound to the current session. Create or open a remote workspace first.',

@@ -5,8 +5,16 @@ import { apply } from '../remote-tool-restrict.js'
 test('remote presets hide global ops tools and deny scope-local local tools', async () => {
   let restriction = null
   let listener = null
+  const knownGlobalTools = new Set(['working_directory', 'render_ui', 'validate_dsh_ui'])
   apply({
-    tools: { restrict(value) { restriction = value } },
+    tools: {
+      restrict(value) {
+        for (const name of value.deny) {
+          if (!knownGlobalTools.has(name)) throw new Error(`tools.restrict() names unknown global tool "${name}"`)
+        }
+        restriction = value
+      },
+    },
     effect(fn) { fn() },
     get() { return undefined },
     on(name, fn) {
@@ -15,9 +23,7 @@ test('remote presets hide global ops tools and deny scope-local local tools', as
       return () => {}
     },
   })
-  assert.ok(restriction.deny.includes('ops_read_files'))
-  assert.ok(restriction.deny.includes('working_directory'))
-  assert.ok(!restriction.deny.includes('ops_bash'))
+  assert.deepEqual(restriction.deny, ['working_directory', 'render_ui', 'validate_dsh_ui'])
 
   const next = async () => ({ kind: 'allow' })
   const denied = await listener({ name: 'ops_bash' }, next)

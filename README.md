@@ -22,7 +22,7 @@
 
 传统的远程开发通常是“再开一个远程 IDE / 再连一个远程服务”。DSH Remote SSH 选择另一种方式：
 
-- **不启动远程 dsh**：没有远程 profile、代理、嵌入 UI 或远程会话同步；
+- **不启动远程 dsh**：没有远程 profile、代理或嵌入 UI；远程 dsh 的历史会话可以手动导入本地，导入后仍由本地 agent 驱动；
 - **只把工具执行搬到远程**：agent 仍然在本地，模型、上下文、审批、会话历史都在本地；
 - **工作区就是远程目录**：新建远程工作区后，当前会话的 fs / shell / terminal 自动绑定到该主机和目录；
 - **保留 DSH 的交互方式**：会话、工作区切换、Remote Files、文件树、终端都还在同一个 UI 里。
@@ -35,7 +35,8 @@
 - 远程工作区只需要 SSH 主机和远程目录，不需要配置 preset；
 - 支持在远程目录树里浏览、筛选、前进/后退并选择目录；
 - 工作区记录绑定 `hostId`、`target`、`remotePath`、本地 handle、模式与 preset；
-- 远程路径在创建前通过 SSH 校验必须存在且是目录。
+- 远程路径在创建前通过 SSH 校验必须存在且是目录；
+- 绑定会读取 DSH 当前的 effective working directory（新版 DSH 的 `workingDirectory` 服务），并在 Host 端文件请求没有 agent initiator 时回退到已打开的远程会话；无法绑定时写入 `~/.dsh/remote-ssh/binding-debug.json` 供诊断。
 
 ### 远程工具
 
@@ -46,7 +47,7 @@
 - fs 搜索与大文件分页；
 - 远程终端。
 
-本地 `ops_*`、`working_directory`、`render_ui` 等工具在远程 preset 中被限制，避免误用本地路径。
+本地 `working_directory`、`render_ui`、`validate_dsh_ui` 等全局工具在远程 preset 中被限制；`ops_*` 是 scope-local 工具，不能用 `tools.restrict()` 隐藏，由 pre-execute 拒绝，避免误用本地路径。
 
 ### 三种远程模式
 
@@ -80,6 +81,37 @@
 - viewer 只读显示前 1000 行，完整内容用 Remote Files。
 
 这样既保留了 DSH 文件树的导航体验，又不会让大仓库同步拖慢本地。
+
+### 对话中的文件预览
+
+对话里的文件链接和文件变更记录继续使用 DSH 原生的右侧文档预览：
+
+- 点击远程文件路径时，Host 侧的 `workspaceFiles` 会映射到远程文件系统按需读取；
+- 绝对路径和相对路径都按当前会话的远程工作区解析；
+- 大文件仍走分页读取与审批；
+- 导入的远程会话没有本地 `workspaceChanges` 快照，插件会从工具结果的 `meta.diffs` 重建变更摘要和对比；只覆盖带 `diffs` 的文件工具结果，纯 bash 改动不会伪造 diff；
+- 如果升级后首次打开仍是空白，重启 DSH 让 Host 桥接重新挂载；诊断信息在 `~/.dsh/remote-ssh/file-surface-bridge.json`、`workspace-changes-bridge.json` 和 `file-surface-calls.json`。
+
+### 导入远程 DSH 会话
+
+远程机器上已有的 dsh 会话可以手动导入本地：
+
+1. 打开侧栏 **Remote SSH**；
+2. 在目标主机行点 **导入会话**；
+3. 插件通过 SSH 扫描远程 `~/.dsh/sessions`，列出会话标题、工作目录、更新时间、大小；
+4. 勾选一个或多个会话，点 **导入所选会话**；
+5. 导入完成后直接打开会话，在本地查看历史并继续对话。
+
+导入规则：
+
+- 只读取远程 session log 的快照，不启动远程 dsh，也不会修改远程会话；
+- 只支持 DSH 当前的 v4 log；更早的 v3 log 需要先在远程用兼容版本迁移，不能直接导入；
+- 远程 `cwd` 会映射为本地 remote-agent workspace；如果该远程目录还没有工作区，会自动创建；
+- 导入后的 session header 指向本地 remote-agent workspace，preset 为 `remote-standard` / `remote-ptc` / `remote-minimal`（取决于该远程目录已有工作区的模式），因此继续对话时仍然使用远程 fs / shell / terminal；
+- 远程日志里的 `agent-preset/selected` 事件会被改写，避免回放时切回远程机器上的本地 preset；
+- 远程日志里的 `approval/policy`、`sandbox/mode`、`permission/preset` 事件会保留在原序号位置，但 payload 改成本地限制性默认值（`ask` / `workspace-write` / `workspace-write`），避免远程策略在本地回放时放宽本地审批/沙箱设置，同时不破坏 v4 事件的 `throughSeq`、`shadowedSeqs` 等序号关系；
+- 已导入的 session id 会标记为 **已导入**，不会重复写入；
+- 导入是手动快照：导入后远程会话的新消息不会自动同步；再次导入同一 id 时只会跳过。
 
 ### 终端
 
@@ -187,7 +219,8 @@ Remote SSH 页面提供 **沙箱日志** 按钮，显示 `sandbox=bwrap|none`、
 4. 点 **Add Workspace**（加号）→ **添加远程工作区**；
 5. 选择主机与远程目录；
 6. 创建并打开远程工作区；
-7. 在 Remote Files、文件树、终端或对话中使用远程工具。
+7. 在 Remote Files、文件树、终端或对话中使用远程工具；
+8. 如果要继续远程机器上已有的 dsh 会话，回 **Remote SSH** 页点主机的 **导入会话**。
 
 ## 项目结构
 
@@ -197,9 +230,10 @@ dsh-remote-ssh/
 ├─ client.js                 # Web UI（工作区菜单、Remote SSH 页、Remote Files、对话框、viewer）
 ├─ cordis.patch.yml          # bundle patch：Host 插件、presets、terminal group
 ├─ lib/
-│  ├─ controller.js          # 主机、工作区、binding、文件路由、沙箱检测
+│  ├─ controller.js          # 主机、工作区、binding、文件路由、沙箱检测、会话导入
 │  ├─ remote.js              # SSH 调用与路径校验
 │  ├─ mirror.js              # 文件树 names-only mirror
+│  ├─ remote-sessions.js     # 远程 session 扫描结果解析、标题提取、导入 header
 │  └─ ...
 ├─ remote-fs.js              # 远程 fs provider
 ├─ remote-shell.js           # 远程 shell provider + bwrap + 日志
@@ -241,6 +275,8 @@ node --check lib/controller.js
 node test/workspace-binding.test.mjs
 node test/remote-bound.test.mjs
 node test/remote-tool-restrict.test.mjs
+node test/remote-sessions.test.mjs
+node test/import-remote-sessions.test.mjs
 ```
 
 Windows 下某些测试可能遇到 `spawn EPERM`，这是 DSH 沙箱对子进程的限制，不是测试失败；逐文件运行通常可以绕过。
@@ -250,6 +286,7 @@ Windows 下某些测试可能遇到 `spawn EPERM`，这是 DSH 沙箱对子进�
 - 远程没有 DSH 的 OS sandbox；bwrap 是可选的额外隔离，且依赖远程内核/用户命名空间；
 - bwrap 只覆盖远程 bash / terminal；远程 fs 工具仍是 direct SSH；
 - 文件树是 names-only mirror，目录变化后需要刷新；
+- 会话导入是手动快照，不是持续同步；导入后远程新消息不会自动出现在本地；
 - 远程连接按操作建立，不是持久 ControlMaster；
 - 远程路径、目录大小、下载大小与 SSH 延迟都会影响体验；
 - 这是实验性插件，接口可能随 DSH 变化。

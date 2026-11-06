@@ -94,6 +94,35 @@ window.__ModuleLoader__.load({
         'workspace.sandboxLog': '沙箱日志',
         'workspace.sandboxLogEmpty': '还没有执行日志。',
         'workspace.hostSaved': '主机已保存。',
+        'workspace.importSessions': '导入会话',
+        'workspace.importTitle': '导入远程 DSH 会话',
+        'workspace.importSubtitle': '从 {host} 的 ~/.dsh/sessions 选择历史会话；导入后可在本地查看并继续。',
+        'workspace.importLoading': '正在读取远程会话…',
+        'workspace.importEmpty': '远程机器上没有找到 DSH 会话。',
+        'workspace.importSelectAll': '全选',
+        'workspace.importClear': '清空',
+        'workspace.importSelected': '已选择 {count} 个会话',
+        'workspace.importProcessed': '已处理 {count} 个会话',
+        'workspace.importAction': '导入所选会话',
+        'workspace.importing': '正在导入…',
+        'workspace.importDone': '已导入 {count} 个会话。',
+        'workspace.importSkipped': '{count} 个会话已经导入过。',
+        'workspace.importFailed': '{count} 个会话导入失败。',
+        'workspace.importUntitled': '未命名会话',
+        'workspace.importImported': '已导入',
+        'workspace.importExisting': '本地已存在',
+        'workspace.importNewWorkspace': '将新建远程工作区',
+        'workspace.importOpen': '打开会话',
+        'workspace.importOpenWorkspace': '打开工作区',
+        'workspace.importClose': '完成',
+        'workspace.importNoSelection': '请选择要导入的会话。',
+        'workspace.importTruncated': '只显示最近的 {count} 个会话。',
+        'workspace.importSize': '大小',
+        'workspace.importUpdated': '更新于',
+        'workspace.importRemotePath': '远程目录',
+        'workspace.importVersion': 'v{version}',
+        'workspace.importEvents': '{count} 条事件',
+        'workspace.importReason': '原因：{reason}',
         'workspace.create': '新建远程工作区',
         'workspace.path': '工作区路径',
         'workspace.mode': '模式',
@@ -341,6 +370,35 @@ window.__ModuleLoader__.load({
         'workspace.sandboxLog': 'Sandbox log',
         'workspace.sandboxLogEmpty': 'No command has run yet.',
         'workspace.hostSaved': 'Host saved.',
+        'workspace.importSessions': 'Import sessions',
+        'workspace.importTitle': 'Import remote DSH sessions',
+        'workspace.importSubtitle': 'Choose historical sessions from {host} under ~/.dsh/sessions; after import they open and continue locally.',
+        'workspace.importLoading': 'Reading remote sessions…',
+        'workspace.importEmpty': 'No DSH sessions were found on this remote host.',
+        'workspace.importSelectAll': 'Select all',
+        'workspace.importClear': 'Clear',
+        'workspace.importSelected': '{count} sessions selected',
+        'workspace.importProcessed': '{count} sessions processed',
+        'workspace.importAction': 'Import selected',
+        'workspace.importing': 'Importing…',
+        'workspace.importDone': 'Imported {count} sessions.',
+        'workspace.importSkipped': '{count} sessions were already imported.',
+        'workspace.importFailed': '{count} sessions failed to import.',
+        'workspace.importUntitled': 'Untitled session',
+        'workspace.importImported': 'Imported',
+        'workspace.importExisting': 'Already local',
+        'workspace.importNewWorkspace': 'Will create a remote workspace',
+        'workspace.importOpen': 'Open session',
+        'workspace.importOpenWorkspace': 'Open workspace',
+        'workspace.importClose': 'Done',
+        'workspace.importNoSelection': 'Select at least one session to import.',
+        'workspace.importTruncated': 'Showing the {count} most recent sessions.',
+        'workspace.importSize': 'Size',
+        'workspace.importUpdated': 'Updated',
+        'workspace.importRemotePath': 'Remote directory',
+        'workspace.importVersion': 'v{version}',
+        'workspace.importEvents': '{count} events',
+        'workspace.importReason': 'Reason: {reason}',
         'workspace.create': 'Create remote workspace',
         'workspace.path': 'Workspace path',
         'workspace.mode': 'Mode',
@@ -3173,6 +3231,214 @@ window.__ModuleLoader__.load({
       )
     }
 
+    function formatSessionDate(value) {
+      const time = typeof value === 'number' ? value : Date.parse(String(value ?? ''))
+      if (!Number.isFinite(time)) return ''
+      try {
+        return new Date(time).toLocaleString()
+      } catch {
+        return ''
+      }
+    }
+
+    function RemoteSessionsDialog({ ctx, t, host, onClose }) {
+      const [loading, setLoading] = useState(true)
+      const [loadError, setLoadError] = useState(null)
+      const [data, setData] = useState(null)
+      const [selected, setSelected] = useState([])
+      const [importing, setImporting] = useState(false)
+      const [importError, setImportError] = useState(null)
+      const [result, setResult] = useState(null)
+
+      const load = useCallback(async () => {
+        setLoading(true)
+        setLoadError(null)
+        try {
+          const response = await callApi('remoteSessions', { id: host.id })
+          setData(response)
+        } catch (failure) {
+          setLoadError(errorText(t, failure))
+        } finally {
+          setLoading(false)
+        }
+      }, [host.id, t])
+
+      useEffect(() => { void load() }, [load])
+
+      const sessions = Array.isArray(data?.sessions) ? data.sessions : []
+      const selectable = sessions.filter((session) => !session.localExists)
+      const selectedSet = new Set(selected)
+      const allSelected = selectable.length > 0 && selectable.every((session) => selectedSet.has(session.id))
+      const canOpen = Boolean(ctx.uiWorkspace && (
+        typeof ctx.uiWorkspace.openSession === 'function'
+        || typeof ctx.uiWorkspace.openWorkspace === 'function'
+      ))
+
+      const toggle = (id) => {
+        if (importing) return
+        setSelected((current) => current.includes(id)
+          ? current.filter((item) => item !== id)
+          : [...current, id])
+      }
+
+      const toggleAll = () => {
+        if (importing) return
+        setSelected(allSelected ? [] : selectable.map((session) => session.id))
+      }
+
+      const importSelected = async () => {
+        const ids = sessions
+          .filter((session) => selectedSet.has(session.id) && !session.localExists)
+          .map((session) => session.id)
+        if (ids.length === 0) {
+          setImportError(t('workspace.importNoSelection'))
+          return
+        }
+        setImporting(true)
+        setImportError(null)
+        try {
+          const response = await callApi('importRemoteSessions', { id: host.id, sessionIds: ids })
+          setResult(response)
+          const done = new Set([
+            ...(response.imported ?? []).map((item) => item.id),
+            ...(response.skipped ?? []).map((item) => item.id),
+          ])
+          setData((current) => current ? {
+            ...current,
+            sessions: (current.sessions ?? []).map((session) => done.has(session.id)
+              ? { ...session, localExists: true, workspaceKnown: true }
+              : session),
+          } : current)
+          setSelected([])
+        } catch (failure) {
+          setImportError(errorText(t, failure))
+        } finally {
+          setImporting(false)
+        }
+      }
+
+      const openResult = async () => {
+        const target = result?.imported?.[0] ?? result?.skipped?.[0]
+        if (!target) return
+        const ui = ctx.uiWorkspace
+        try {
+          if (typeof ui?.openWorkspace === 'function' && target.workspaceId) {
+            await ui.openWorkspace(target.workspaceId)
+          }
+          if (typeof ui?.openSession === 'function' && target.id) {
+            await ui.openSession(target.id)
+          }
+          onClose?.()
+        } catch (failure) {
+          setImportError(errorText(t, failure))
+        }
+      }
+
+      const close = () => {
+        if (importing) return
+        onClose?.()
+      }
+
+      const summary = result
+        ? h('div', { className: 'dsh-remote-import-summary' },
+          (result.imported ?? []).length > 0
+            ? h('div', { className: 'dsh-remote-import-summary-line' }, t('workspace.importDone', { count: result.imported.length }))
+            : null,
+          (result.skipped ?? []).length > 0
+            ? h('div', { className: 'dsh-remote-import-summary-line' }, t('workspace.importSkipped', { count: result.skipped.length }))
+            : null,
+          (result.failed ?? []).length > 0
+            ? h('div', { className: 'dsh-remote-import-failure' },
+              h('div', { className: 'dsh-remote-import-summary-line' }, t('workspace.importFailed', { count: result.failed.length })),
+              result.failed.slice(0, 8).map((item) => h('div', { key: item.id, className: 'dsh-remote-import-failure-line' },
+                `${item.id}: ${item.message}`)))
+            : null,
+        )
+        : null
+
+      return h('div', {
+        className: 'dsh-remote-import-overlay',
+        onClick: (event) => { if (event.target === event.currentTarget) close() },
+      }, h('div', {
+        className: 'dsh-remote-dialog dsh-remote-import-dialog',
+        role: 'dialog',
+        'aria-modal': 'true',
+        'aria-label': t('workspace.importTitle'),
+      },
+      h('div', { className: 'dsh-remote-dialog-head' },
+        h('div', { style: { flex: 1, minWidth: 0 } },
+          h('h3', { className: 'dsh-remote-dialog-title' }, t('workspace.importTitle')),
+          h('div', { className: 'dsh-remote-dialog-sub' }, t('workspace.importSubtitle', { host: host.name || host.target })),
+        ),
+        h('button', { type: 'button', className: 'rs-btn rs-btn-ghost', disabled: importing, onClick: close }, t('workspace.importClose')),
+      ),
+      h('div', { className: 'dsh-remote-dialog-body' },
+        importError ? h('div', { className: 'rs-error' }, importError) : null,
+        loading
+          ? h('div', { className: 'rs-hint' }, t('workspace.importLoading'))
+          : loadError
+            ? h('div', { className: 'rs-error' }, loadError)
+            : sessions.length === 0
+              ? h('div', { className: 'rs-empty' }, h('div', { className: 'rs-empty-title' }, t('workspace.importEmpty')))
+              : h(React.Fragment, null,
+                data?.truncated
+                  ? h('div', { className: 'rs-hint' }, t('workspace.importTruncated', { count: data.scanned }))
+                  : null,
+                summary,
+                h('div', { className: 'dsh-remote-session-list' }, sessions.map((session) => {
+                  const disabled = session.localExists === true
+                  const title = session.title || `${t('workspace.importUntitled')} · ${String(session.id).slice(-8)}`
+                  return h('label', {
+                    key: session.id,
+                    className: 'dsh-remote-session-row',
+                    'data-disabled': disabled ? 'true' : 'false',
+                    title: session.remotePath || title,
+                  },
+                  h('input', {
+                    type: 'checkbox',
+                    checked: selectedSet.has(session.id),
+                    disabled: disabled || importing,
+                    onChange: () => toggle(session.id),
+                  }),
+                  h('div', { className: 'dsh-remote-session-main' },
+                    h('div', { className: 'dsh-remote-session-title' }, title),
+                    h('div', { className: 'dsh-remote-session-meta' },
+                      session.cwd ? h('code', { className: 'dsh-remote-session-path' }, session.cwd) : null,
+                      session.updatedAt ? h('span', null, t('workspace.importUpdated'), ' ', formatSessionDate(session.updatedAt)) : null,
+                      Number.isFinite(session.size) ? h('span', null, t('workspace.importSize'), ' ', formatBytes(session.size)) : null,
+                      Number.isSafeInteger(session.version) ? h('span', null, t('workspace.importVersion', { version: session.version })) : null,
+                    ),
+                  ),
+                  h('div', { className: 'dsh-remote-session-badges' },
+                    disabled ? h('span', { className: 'dsh-remote-session-badge' }, t('workspace.importExisting')) : null,
+                    !disabled && !session.workspaceKnown ? h('span', { className: 'dsh-remote-session-badge' }, t('workspace.importNewWorkspace')) : null,
+                  ),
+                  )
+                })),
+              ),
+      ),
+      h('div', { className: 'dsh-remote-dialog-footer' },
+        result
+          ? h(React.Fragment, null,
+            h('div', { className: 'rs-hint', style: { flex: 1, minWidth: 0 } }, t('workspace.importProcessed', { count: (result.imported ?? []).length + (result.skipped ?? []).length })),
+            canOpen && ((result.imported ?? []).length + (result.skipped ?? []).length) > 0
+              ? h('button', { type: 'button', className: 'rs-btn rs-btn-primary', onClick: openResult },
+                (result.imported ?? []).length > 1 ? t('workspace.importOpenWorkspace') : t('workspace.importOpen'))
+              : null,
+            h('button', { type: 'button', className: 'rs-btn', onClick: close }, t('workspace.importClose')),
+          )
+          : h(React.Fragment, null,
+            h('div', { className: 'rs-hint', style: { flex: 1, minWidth: 0 } }, t('workspace.importSelected', { count: selected.length })),
+            h('button', { type: 'button', className: 'rs-btn rs-btn-ghost', disabled: importing || selectable.length === 0, onClick: toggleAll },
+              allSelected ? t('workspace.importClear') : t('workspace.importSelectAll')),
+            h('button', { type: 'button', className: 'rs-btn', disabled: importing, onClick: close }, t('flow.cancel')),
+            h('button', { type: 'button', className: 'rs-btn rs-btn-primary', disabled: importing || selected.length === 0, onClick: importSelected },
+              importing ? t('workspace.importing') : t('workspace.importAction')),
+          ),
+      ),
+      ))
+    }
+
     function RemoteWorkspacesPage({ ctx, t }) {
       const [connections, setConnections] = useState([])
       const [loading, setLoading] = useState(false)
@@ -3180,6 +3446,7 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = useState(null)
       const [hostForm, setHostForm] = useState({ name: '', target: '' })
       const [sandboxLog, setSandboxLog] = useState(null)
+      const [importHost, setImportHost] = useState(null)
 
       const refresh = useCallback(async () => {
         setLoading(true)
@@ -3321,6 +3588,7 @@ window.__ModuleLoader__.load({
                   ? h('div', { className: 'dsh-remote-host-reason' }, item.sandboxReason)
                   : null,
               ),
+              h('button', { type: 'button', className: 'rs-btn', title: t('workspace.importSessions'), onClick: () => setImportHost(item) }, t('workspace.importSessions')),
               h('button', { type: 'button', className: 'rs-btn', title: t('workspace.detectSandbox'), onClick: () => checkSandbox(item.id) }, t('workspace.detectSandbox')),
               h('button', { type: 'button', className: 'rs-btn', title: t('workspace.remove'), onClick: () => removeHost(item.id) }, '×'),
               ))),
@@ -3348,11 +3616,17 @@ window.__ModuleLoader__.load({
             }
           }).join('\n\n') || t('workspace.sandboxLogEmpty')),
         )) : null,
+        importHost ? h(RemoteSessionsDialog, {
+          ctx,
+          t,
+          host: importHost,
+          onClose: () => setImportHost(null),
+        }) : null,
       )
     }
 
     return {
-      inject: ['slots', 'locale', 'layout'],
+      inject: ['slots', 'locale', 'layout', 'uiWorkspace'],
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(NS, DICT), 'remote-ssh: locale')
         const t = ctx.locale.bind(NS)
@@ -3390,6 +3664,23 @@ window.__ModuleLoader__.load({
 .dsh-remote-file-row:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}
 .dsh-remote-file-row[data-active="true"]{background:var(--dsw-alias-bg-layer-2)}
 .dsh-remote-file-size{margin-left:auto;font-size:11px;color:var(--dsw-alias-label-secondary);flex:0 0 auto}
+.dsh-remote-import-overlay{position:fixed;inset:0;z-index:1400;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;padding:20px}
+.dsh-remote-import-dialog{width:min(820px,94vw);max-height:88vh}
+.dsh-remote-session-list{display:flex;flex-direction:column;gap:6px;min-height:0}
+.dsh-remote-session-row{display:flex;align-items:flex-start;gap:10px;padding:10px 10px;border:1px solid var(--dsw-alias-border-l1);border-radius:9px;background:var(--dsw-alias-bg-layer-1);cursor:pointer}
+.dsh-remote-session-row:hover{background:var(--dsw-alias-bg-layer-2)}
+.dsh-remote-session-row[data-disabled="true"]{opacity:.62;cursor:default}
+.dsh-remote-session-row input{margin:2px 0 0;flex:0 0 auto;accent-color:var(--dsw-alias-brand-primary)}
+.dsh-remote-session-main{flex:1;min-width:0}
+.dsh-remote-session-title{font-size:13px;font-weight:600;line-height:1.45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-remote-session-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:3px;font-size:11.5px;line-height:1.45;color:var(--dsw-alias-label-secondary)}
+.dsh-remote-session-path{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.dsh-remote-session-badges{display:flex;align-items:center;gap:4px;flex:0 0 auto}
+.dsh-remote-session-badge{font-size:10.5px;line-height:1.3;padding:2px 6px;border-radius:999px;border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-secondary);white-space:nowrap}
+.dsh-remote-import-summary{border:1px solid var(--dsw-alias-border-l1);border-radius:9px;padding:9px 10px;background:var(--dsw-alias-bg-layer-1);font-size:12px;line-height:1.55}
+.dsh-remote-import-summary-line{color:var(--dsw-alias-label-primary)}
+.dsh-remote-import-failure{margin-top:6px;color:var(--dsw-alias-label-secondary)}
+.dsh-remote-import-failure-line{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;line-height:1.5;word-break:break-word}
 `
           document.head.appendChild(tag)
           return () => tag.remove()

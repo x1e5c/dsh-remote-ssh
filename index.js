@@ -53,6 +53,8 @@ export function apply(ctx, config) {
     agentWorkspace: (body) => controller.createAgentWorkspace(requireId(body), body?.remotePath, body?.mode),
     agentWorkspaces: () => ({ workspaces: controller.listAgentWorkspaces() }),
     remoteDirs: (body) => controller.listRemoteDirs(body),
+    remoteSessions: (body) => controller.listRemoteSessions(body),
+    importRemoteSessions: (body) => controller.importRemoteSessions(body),
     filesList: (body) => controller.listAgentFiles(body),
     filesRead: (body) => controller.readAgentFile(body),
     filesWrite: (body) => controller.writeAgentFile(body),

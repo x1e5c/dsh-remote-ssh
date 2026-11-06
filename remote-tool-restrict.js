@@ -1,9 +1,13 @@
+import { currentRemoteWorkspace } from './lib/binding-service.js'
+
 export const name = 'remote-tool-restrict'
 export const inject = ['tools']
 
 // Global Host tools that can be hidden from the agent with tools.restrict().
+// Keep this list to tools that are global in every supported DSH release.
+// `ops_*` tools are scope-local now and are rejected by tools.restrict();
+// they are denied at pre-execute below instead.
 const GLOBAL_HOST_TOOLS = [
-  'ops_read_files',
   'working_directory',
   'render_ui',
   'validate_dsh_ui',
@@ -29,7 +33,7 @@ export function apply(ctx, config) {
   ctx.effect(() => ctx.on('tools/pre-execute', async (exec, next) => {
     if (exec.name === 'terminal_open') {
       const type = exec.arguments?.type
-      const binding = ctx.get('remoteSshWorkspace')?.current?.()
+      const binding = currentRemoteWorkspace(ctx)
       const required = binding?.terminalType ?? expectedTerminalType
       if (required) {
         if (type === required) return next()

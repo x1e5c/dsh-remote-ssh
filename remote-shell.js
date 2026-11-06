@@ -4,6 +4,7 @@ import { join, posix } from 'node:path'
 import { appendFile, mkdir } from 'node:fs/promises'
 import { buildRemoteCommand } from './remote-tools.js'
 import { shellQuote } from './lib/remote.js'
+import { currentRemoteWorkspace } from './lib/binding-service.js'
 
 export const name = 'remote-agent-shell'
 export const inject = []
@@ -276,7 +277,7 @@ export function createBoundRemoteShell(ctx) {
   const log = makeSandboxLogger(ctx)
 
   function service() {
-    const binding = ctx.get('remoteSshWorkspace')?.current?.()
+    const binding = currentRemoteWorkspace(ctx)
     if (!binding || !binding.host || !binding.remotePath) {
       const error = new Error('No Remote Agent workspace is bound to the current session.')
       error.code = 'SHELL_NO_REMOTE_WORKSPACE'
