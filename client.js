@@ -2311,6 +2311,10 @@ window.__ModuleLoader__.load({
       const [error, setError] = useState(null)
 
       useEffect(() => () => downloadControllerRef.current?.abort(), [])
+      useEffect(() => {
+        const url = preview?.imageUrl
+        return () => { if (url) URL.revokeObjectURL(url) }
+      }, [preview?.imageUrl])
 
       const loadDir = useCallback(async (id, target) => {
         if (!id) return
@@ -2359,6 +2363,26 @@ window.__ModuleLoader__.load({
         setEditing(false)
         setSaved(false)
         try {
+          const imageMime = imageMimeForPath(entry.path)
+          if (imageMime) {
+            const image = await fetchRemoteFileBlob(workspaceId, entry.path)
+            const url = URL.createObjectURL(new Blob([image.blob], { type: imageMime }))
+            setPreview({
+              workspaceId,
+              path: entry.path,
+              size: image.size ?? image.blob.size ?? null,
+              version: null,
+              offset: 0,
+              nextOffset: 0,
+              lastPageFull: false,
+              text: '',
+              binary: false,
+              truncated: false,
+              lines: 0,
+              imageUrl: url,
+            })
+            return
+          }
           const file = await callApi('filesRead', { workspaceId, path: entry.path, offset: 0, limit: 200 })
           setPreview({ ...file, offset: 0, nextOffset: 200, lastPageFull: file.lines >= 200 })
         } catch (failure) {
@@ -2369,7 +2393,7 @@ window.__ModuleLoader__.load({
       }
 
       const loadMore = async () => {
-        if (!preview || preview.binary || loadingMore) return
+        if (!preview || preview.binary || preview.imageUrl || loadingMore) return
         setLoadingMore(true)
         setError(null)
         try {
@@ -2391,7 +2415,7 @@ window.__ModuleLoader__.load({
       }
 
       const startEdit = async () => {
-        if (!preview || preview.binary) return
+        if (!preview || preview.binary || preview.imageUrl) return
         if (preview.size > 256 * 1024) {
           setError(new Error(t('files.editTooLarge')))
           return
@@ -2586,7 +2610,7 @@ window.__ModuleLoader__.load({
                       h('div', { className: 'rs-meta', style: { marginTop: 0, marginBottom: 8, gap: 8, alignItems: 'center' } },
                         h('code', { className: 'rs-target' }, preview.path),
                         h('span', null, formatBytes(preview.size)),
-                        h('span', null, t('files.lines').replace('{count}', String(preview.lines))),
+                        preview.imageUrl ? null : h('span', null, t('files.lines').replace('{count}', String(preview.lines))),
                         isTable ? h('span', { className: 'rs-badge' }, t('files.table')) : null,
                         saved ? h('span', { className: 'rs-hint', style: { margin: 0 } }, t('files.saved')) : null,
                         downloaded ? h('span', { className: 'rs-hint', style: { margin: 0 } }, t('files.downloaded')) : null,
@@ -2601,7 +2625,7 @@ window.__ModuleLoader__.load({
                           : !editing
                             ? h('button', { type: 'button', className: 'rs-btn', style: { marginLeft: 'auto' }, onClick: downloadFull }, t('files.download'))
                             : null,
-                        !preview.binary && !editing && preview.size <= 256 * 1024
+                        !preview.binary && !preview.imageUrl && !editing && preview.size <= 256 * 1024
                           ? h('button', { type: 'button', className: 'rs-btn', disabled: loading, onClick: startEdit }, t('files.edit'))
                           : null,
                         editing
@@ -2631,15 +2655,23 @@ window.__ModuleLoader__.load({
                             color: 'var(--dsw-alias-label-primary)',
                           },
                         })
-                        : preview.binary
-                          ? h('div', { className: 'rs-hint' }, t('files.binary'))
-                          : isTable
-                            ? renderTablePreview(preview)
-                            : h('pre', { style: { margin: 0, fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace', fontSize: 12, lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--dsw-alias-label-primary)' } }, preview.text || ''),
+                        : preview.imageUrl
+                          ? h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 240, background: 'var(--dsw-alias-bg-layer-1)', borderRadius: 8, padding: 12 } },
+                            h('img', {
+                              src: preview.imageUrl,
+                              alt: String(preview.path || 'remote image').split('/').pop() || 'remote image',
+                              style: { display: 'block', maxWidth: '100%', maxHeight: 'calc(100vh - 340px)', objectFit: 'contain' },
+                            }),
+                          )
+                          : preview.binary
+                            ? h('div', { className: 'rs-hint' }, t('files.binary'))
+                            : isTable
+                              ? renderTablePreview(preview)
+                              : h('pre', { style: { margin: 0, fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace', fontSize: 12, lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--dsw-alias-label-primary)' } }, preview.text || ''),
                       preview.truncated && !editing
                         ? h('div', { className: 'rs-hint' }, t('files.truncated').replace('{count}', '200'))
                         : null,
-                      !preview.binary && !editing
+                      !preview.binary && !preview.imageUrl && !editing
                         ? h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 10 } },
                           preview.lastPageFull
                             ? h('button', { type: 'button', className: 'rs-btn', disabled: loadingMore, onClick: loadMore }, loadingMore ? t('files.loadingMore') : t('files.loadMore'))
@@ -3022,18 +3054,259 @@ window.__ModuleLoader__.load({
       }
     }
 
+    const IMAGE_MIME_TYPES = {
+      png: 'image/png',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      gif: 'image/gif',
+      webp: 'image/webp',
+      bmp: 'image/bmp',
+      svg: 'image/svg+xml',
+      avif: 'image/avif',
+      ico: 'image/x-icon',
+      tif: 'image/tiff',
+      tiff: 'image/tiff',
+    }
+
+    function imageMimeForPath(path) {
+      const match = /\.([a-z0-9]+)$/i.exec(String(path ?? ''))
+      return match ? IMAGE_MIME_TYPES[match[1].toLowerCase()] ?? null : null
+    }
+
+    async function fetchRemoteFileBlob(workspaceId, path, signal) {
+      const response = await fetch('/api/remote-ssh/filesDownload', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workspaceId, path }),
+        credentials: 'same-origin',
+        signal,
+      })
+      if (!response.ok) {
+        let detail = null
+        try {
+          const payload = await response.json()
+          detail = payload?.error?.message ?? null
+        } catch {
+          // ignore
+        }
+        throw new Error(detail || 'Could not read the remote file.')
+      }
+      return { blob: await response.blob(), size: Number(response.headers.get('content-length')) || null }
+    }
+
+    // DSH's native document preview reads through the client-side
+    // `remote.workspaceFiles` namespace. Its Host implementation only knows
+    // the local filesystem, so remote mirror paths must be redirected to the
+    // plugin's SSH routes. Keep this bridge on the client as well as the Host
+    // bridge: newer DSH releases can mount the remote service after the Host
+    // plugin fiber, and a missed Host patch otherwise turns every image/TSV
+    // preview into a "file not found" error.
+    let nativeWorkspaceList = { at: 0, promise: null }
+    function loadNativeWorkspaces() {
+      if (nativeWorkspaceList.promise && Date.now() - nativeWorkspaceList.at < 5000) return nativeWorkspaceList.promise
+      nativeWorkspaceList.at = Date.now()
+      nativeWorkspaceList.promise = callApi('agentWorkspaces')
+        .then((payload) => (Array.isArray(payload?.workspaces) ? payload.workspaces : []))
+        .catch((failure) => {
+          nativeWorkspaceList.promise = null
+          throw failure
+        })
+      return nativeWorkspaceList.promise
+    }
+
+    function nativeFileTarget(value, workspaces) {
+      const normalized = String(value ?? '').replace(/\\/g, '/')
+      if (normalized === '') return null
+      let best = null
+      for (const workspace of workspaces) {
+        const localRoot = String(workspace?.path ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
+        const remoteRoot = String(workspace?.remotePath ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
+        if (localRoot && (normalized === localRoot || normalized.startsWith(`${localRoot}/`))) {
+          const relative = normalized.slice(localRoot.length).replace(/^\/+/, '')
+          const candidate = {
+            workspaceId: workspace.workspaceId,
+            path: relative === '' ? remoteRoot : `${remoteRoot}/${relative}`,
+            rootLength: localRoot.length,
+          }
+          if (!best || candidate.rootLength > best.rootLength) best = candidate
+        }
+        if (remoteRoot && (normalized === remoteRoot || normalized.startsWith(`${remoteRoot}/`))) {
+          const candidate = { workspaceId: workspace.workspaceId, path: normalized, rootLength: remoteRoot.length }
+          if (!best || candidate.rootLength > best.rootLength) best = candidate
+        }
+      }
+      return best
+    }
+
+    function nativeRemoteFailure(failure) {
+      const message = failure instanceof Error ? failure.message : String(failure ?? 'Remote file read failed')
+      const code = failure?.code === 'FS_NOT_FOUND' || /not found|ENOENT/i.test(message)
+        ? 'workspace-file/not-found'
+        : 'gateway/internal'
+      return { code, message, details: {} }
+    }
+
+    function patchRemoteFilesMethod(files, name, makeWrapper) {      const original = files?.[name]
+      if (typeof original !== 'function') return false
+      const wrapped = makeWrapper(original)
+      try {
+        files[name] = wrapped
+        if (files[name] === wrapped) return true
+      } catch {
+        // fall through to defineProperty
+      }
+      try {
+        Object.defineProperty(files, name, { value: wrapped, writable: true, configurable: true })
+        return files[name] === wrapped
+      } catch {
+        return false
+      }
+    }
+
+    function installNativeWorkspaceFilesBridge(ctx) {
+      const install = (scope) => {
+        let files = null
+        try {
+          files = scope?.remote?.workspaceFiles ?? ctx.get?.('remote')?.workspaceFiles
+        } catch {
+          return false
+        }
+        if (!files || typeof files.read !== 'function') return false
+        if (files.__dshRemoteSshNativeBridge) return true
+        try {
+          files.__dshRemoteSshNativeBridge = true
+        } catch {
+          return false
+        }
+
+        patchRemoteFilesMethod(files, 'read', (original) => async function (sessionId, path, range, signal) {
+          let target = null
+          try { target = nativeFileTarget(path, await loadNativeWorkspaces()) } catch { /* fall back to the Host */ }
+          if (!target) return original.call(this, sessionId, path, range, signal)
+          try {
+            const read = await callApi('filesRead', {
+              workspaceId: target.workspaceId,
+              path: target.path,
+              offset: range?.offset ?? 0,
+              limit: range?.limit ?? 2000,
+            })
+            return {
+              ok: true,
+              value: {
+                absolutePath: read.path ?? target.path,
+                version: read.version ?? '',
+                bytes: read.size ?? undefined,
+                offset: read.offset ?? 0,
+                text: read.text ?? '',
+                lines: read.lines ?? 0,
+                eof: !read.truncated,
+              },
+            }
+          } catch (failure) {
+            return { ok: false, error: nativeRemoteFailure(failure) }
+          }
+        })
+
+        patchRemoteFilesMethod(files, 'readBytes', (original) => async function (sessionId, path, options, signal) {
+          let target = null
+          try {
+            const workspaces = await loadNativeWorkspaces()
+            target = nativeFileTarget(path, workspaces)
+            if (!target && options?.baseFile) {
+              const base = nativeFileTarget(options.baseFile, workspaces)
+              if (base) {
+                const directory = base.path.replace(/\/[^/]*$/, '')
+                target = nativeFileTarget(`${directory}/${String(path ?? '').replace(/^\.?\//, '')}`, workspaces)
+              }
+            }
+          } catch { /* fall back to the Host */ }
+          if (!target) return original.call(this, sessionId, path, options, signal)
+          try {
+            const image = await fetchRemoteFileBlob(target.workspaceId, target.path, signal)
+            const data = new Uint8Array(await image.blob.arrayBuffer())
+            const range = options?.range
+            const offset = Number.isSafeInteger(range?.offset) && range.offset >= 0 ? range.offset : 0
+            const length = Number.isSafeInteger(range?.length) && range.length > 0 ? range.length : undefined
+            const slice = length === undefined ? data.subarray(offset) : data.subarray(offset, offset + length)
+            return {
+              ok: true,
+              value: {
+                absolutePath: target.path,
+                version: '',
+                bytes: data.length,
+                offset,
+                data: slice,
+                eof: offset + slice.length >= data.length,
+              },
+            }
+          } catch (failure) {
+            return { ok: false, error: nativeRemoteFailure(failure) }
+          }
+        })
+
+        patchRemoteFilesMethod(files, 'stat', (original) => async function (sessionId, path, signal) {
+          let target = null
+          try { target = nativeFileTarget(path, await loadNativeWorkspaces()) } catch { /* fall back */ }
+          if (!target) return original.call(this, sessionId, path, signal)
+          try {
+            const read = await callApi('filesRead', { workspaceId: target.workspaceId, path: target.path, offset: 0, limit: 1 })
+            return {
+              ok: true,
+              value: {
+                absolutePath: read.path ?? target.path,
+                version: read.version ?? '',
+                bytes: read.size ?? undefined,
+              },
+            }
+          } catch (failure) {
+            return { ok: false, error: nativeRemoteFailure(failure) }
+          }
+        })
+        return true
+      }
+
+      if (install()) return () => {}
+      if (typeof ctx.inject === 'function') {
+        ctx.inject(['remote.workspaceFiles'], (scope) => { install(scope) })
+      }
+      const timer = setInterval(() => {
+        if (install()) clearInterval(timer)
+      }, 500)
+      return () => clearInterval(timer)
+    }
+
     function RemoteMirrorViewer(props) {
       const { t, path } = props
-      const [state, setState] = useState({ loading: true, error: null, text: '', binary: false, truncated: false, target: null, remotePath: '' })
+      const [state, setState] = useState({ loading: true, error: null, text: '', binary: false, truncated: false, target: null, remotePath: '', imageUrl: null, imageSize: null })
       useEffect(() => {
         let alive = true
+        let objectUrl = null
+        const controller = new AbortController()
         void (async () => {
-          setState((current) => ({ ...current, loading: true, error: null }))
+          setState((current) => ({ ...current, loading: true, error: null, imageUrl: null, imageSize: null }))
           try {
             const data = await callApi('agentWorkspaces')
             const workspaces = Array.isArray(data.workspaces) ? data.workspaces : []
             const target = remotePathForMirror(path, workspaces)
             if (!target) throw new Error(t('viewer.notRemote'))
+            const imageMime = imageMimeForPath(target.path)
+            if (imageMime) {
+              const image = await fetchRemoteFileBlob(target.workspaceId, target.path, controller.signal)
+              if (!alive) return
+              objectUrl = URL.createObjectURL(new Blob([image.blob], { type: imageMime }))
+              setState({
+                loading: false,
+                error: null,
+                text: '',
+                binary: false,
+                truncated: false,
+                target: target.label,
+                remotePath: target.path,
+                imageUrl: objectUrl,
+                imageSize: image.size ?? image.blob.size ?? null,
+              })
+              return
+            }
             const read = await callApi('filesRead', { workspaceId: target.workspaceId, path: target.path, offset: 0, limit: 1000 })
             if (!alive) return
             setState({
@@ -3044,33 +3317,48 @@ window.__ModuleLoader__.load({
               truncated: Boolean(read.truncated) || Number(read.lines ?? 0) >= 1000,
               target: target.label,
               remotePath: target.path,
+              imageUrl: null,
+              imageSize: null,
             })
           } catch (failure) {
             if (alive) setState((current) => ({ ...current, loading: false, error: errorText(t, failure) }))
           }
         })()
-        return () => { alive = false }
+        return () => {
+          alive = false
+          controller.abort()
+          if (objectUrl) URL.revokeObjectURL(objectUrl)
+        }
       }, [path, t])
       return h('div', { style: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid var(--dsw-alias-border-l1)', flex: '0 0 auto' } },
           h('span', { style: { fontWeight: 600, fontSize: 12 } }, t('viewer.remote')),
           h('code', { style: { fontSize: 11, opacity: 0.65, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, state.remotePath || path),
           state.target ? h('span', { className: 'rs-badge', style: { fontSize: 10 } }, state.target) : null,
+          state.imageSize ? h('span', { className: 'rs-badge', style: { fontSize: 10 } }, formatBytes(state.imageSize)) : null,
         ),
         state.loading
           ? h('div', { className: 'rs-hint', style: { padding: 12 } }, t('viewer.loading'))
           : state.error
             ? h('div', { className: 'rs-error', style: { margin: 12 } }, state.error)
-            : state.binary
-              ? h('div', { className: 'rs-hint', style: { padding: 12 } }, t('viewer.binary'))
-              : h(React.Fragment, null,
-                h('pre', {
-                  style: { margin: 0, padding: 12, flex: 1, minHeight: 0, overflow: 'auto', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, lineHeight: 1.55, whiteSpace: 'pre', tabSize: 4 },
-                }, state.text),
-                state.truncated
-                  ? h('div', { className: 'rs-hint', style: { padding: '6px 12px', borderTop: '1px solid var(--dsw-alias-border-l1)', flex: '0 0 auto' } }, t('viewer.truncated'))
-                  : null,
-              ),
+            : state.imageUrl
+              ? h('div', { style: { flex: 1, minHeight: 0, overflow: 'auto', padding: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--dsw-alias-bg-layer-1)' } },
+                h('img', {
+                  src: state.imageUrl,
+                  alt: String(state.remotePath || path).split('/').pop() || 'remote image',
+                  style: { display: 'block', maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' },
+                }),
+              )
+              : state.binary
+                ? h('div', { className: 'rs-hint', style: { padding: 12 } }, t('viewer.binary'))
+                : h(React.Fragment, null,
+                  h('pre', {
+                    style: { margin: 0, padding: 12, flex: 1, minHeight: 0, overflow: 'auto', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, lineHeight: 1.55, whiteSpace: 'pre', tabSize: 4 },
+                  }, state.text),
+                  state.truncated
+                    ? h('div', { className: 'rs-hint', style: { padding: '6px 12px', borderTop: '1px solid var(--dsw-alias-border-l1)', flex: '0 0 auto' } }, t('viewer.truncated'))
+                    : null,
+                ),
       )
     }
 
@@ -3727,6 +4015,13 @@ window.__ModuleLoader__.load({
             if (timer) clearInterval(timer)
           }
         }, 'remote-ssh: remote mirror file viewer')
+        ctx.effect(() => {
+          try {
+            return installNativeWorkspaceFilesBridge(ctx)
+          } catch {
+            return () => {}
+          }
+        }, 'remote-ssh: native workspace files bridge')
         ctx.slots.inject('main', () => ctx.slots.register({
           name: 'main',
           key: 'remote-ssh',

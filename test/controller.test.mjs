@@ -32,6 +32,10 @@ async function makeController() {
   const ctx = {
     dshHomePath: (...parts) => join(dir, ...parts),
     get: (name) => name === 'credentials' ? credentials : undefined,
+    inject(names, callback) {
+      const scope = { credentials }
+      callback(scope)
+    },
     logger: { info() {}, warn() {}, error() {} },
   }
   const controller = new TestController(ctx, {})
