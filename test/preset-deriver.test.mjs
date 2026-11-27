@@ -593,12 +593,14 @@ test('sessionController.create maps/preserves remote presets and local initiator
   await sessionController.create({ cwd: remoteHandle, agentPreset: 'remote-ptc' })
   await sessionController.create({ cwd: remoteHandle, agentPreset: 'ptc' })
   await sessionController.create({ cwd: remoteHandle, agentPreset: 'cordis' })
-  // Local workspace intercepts remote-ptc -> standard.
+  // Local workspace intercepts remote-ptc -> standard, AND overrides omitted agentPreset when global defaultId is remote-*.
+  registry.defaultId = 'remote-standard'
   await sessionController.create({ cwd: localCwd, agentPreset: 'remote-ptc' })
+  await sessionController.create({ cwd: localCwd })
 
   assert.deepEqual(
     createdRequests.map((req) => req.agentPreset),
-    ['remote-ptc', 'remote-ptc', 'remote-standard', 'standard'],
+    ['remote-ptc', 'remote-ptc', 'remote-standard', 'standard', 'standard'],
   )
 
   // A local initiator must NOT fall back to an unrelated open remote session.
@@ -746,6 +748,14 @@ test('client.js filters conversation.hero.agentPreset dropdown options by worksp
   const localFace = entry.inject('sess-local')
   const localSnap = localFace.hooks.agentPresetSeat.getSnapshot()
   assert.deepEqual(localSnap.options.map((o) => o.id), ['standard', 'ptc', 'cordis'])
+  assert.equal(localSnap.current, 'standard', 'local workspace must not display remote-* default')
+
+  // Unbound new-session screen with no remote session in mainView also stays local even if global default is remote-*.
+  sessionSnapshot = { byId: {} }
+  const unboundFace = entry.inject(undefined)
+  const unboundSnap = unboundFace.hooks.agentPresetSeat.getSnapshot()
+  assert.deepEqual(unboundSnap.options.map((o) => o.id), ['standard', 'ptc', 'cordis'])
+  assert.equal(unboundSnap.current, 'standard')
 
   // Cleanup restores slots.register cleanly.
   for (const cleanup of effects) cleanup()

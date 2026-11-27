@@ -22,6 +22,7 @@ function normalizeConfig(config) {
     remotePath: config.remotePath,
     sshExecutable: config.sshExecutable ?? 'ssh',
     connectTimeoutSec: config.connectTimeoutSec ?? 15,
+    sandbox: config.sandbox === 'bwrap' ? 'bwrap' : null,
   }
 }
 
@@ -180,14 +181,27 @@ export function createRemoteFileSystem(config, run = runRemote) {
     }
   }
 
+  function isLexicallyInsideRoot(path) {
+    const root = posix.normalize(cfg.remotePath).replace(/\/+$/, '') || '/'
+    const target = posix.normalize(path)
+    if (root === '/') return target.startsWith('/')
+    return target === root || target.startsWith(`${root}/`)
+  }
+
   async function writeWhole(path, content, signal) {
     const dir = posix.dirname(path)
     const quoted = shellQuote(path)
     const encoded = Buffer.from(content, 'utf8').toString('base64')
+    const guardPrefix = cfg.sandbox === 'bwrap' && isLexicallyInsideRoot(path)
+      ? `if command -v realpath >/dev/null 2>&1; then _r=$(realpath -m -- ${shellQuote(cfg.remotePath)}) && _t=$(realpath -m -- ${quoted}) && case "$_t" in "$_r"|"$_r"/*) ;; *) printf '__DSH_SANDBOX_ESCAPE__\\n' >&2; exit 42 ;; esac; fi && `
+      : ''
     const result = await exec(
-      `mkdir -p ${shellQuote(dir)} && base64 -d > ${quoted} && stat -c '%F|%s|%Y' -L -- ${quoted}`,
+      `${guardPrefix}mkdir -p ${shellQuote(dir)} && base64 -d > ${quoted} && stat -c '%F|%s|%Y' -L -- ${quoted}`,
       { signal, timeoutMs: 60000, stdin: encoded },
     )
+    if (result.code === 42 || String(result.stderr ?? '').includes('__DSH_SANDBOX_ESCAPE__')) {
+      throw fsError(`cannot write "${path}": symlink target escapes remote workspace "${cfg.remotePath}"`, 'FS_SANDBOX_ESCAPE')
+    }
     if (result.code !== 0) throw fsError(`cannot write "${path}": ${String(result.stderr ?? '').trim() || `exit ${result.code}`}`, 'FS_IO_ERROR')
     return parseStatOutput(result.stdout)
   }
@@ -324,10 +338,11 @@ export function createBoundRemoteFileSystem(ctx) {
         'FS_NO_REMOTE_WORKSPACE',
       )
     }
-    const key = `${binding.host}\u0000${binding.remotePath}`
+    const sandbox = binding.sandbox === 'bwrap' ? 'bwrap' : null
+    const key = `${binding.host}\u0000${binding.remotePath}\u0000${sandbox ?? ''}`
     let current = services.get(key)
     if (!current) {
-      current = createRemoteFileSystem({ host: binding.host, remotePath: binding.remotePath })
+      current = createRemoteFileSystem({ host: binding.host, remotePath: binding.remotePath, sandbox })
       services.set(key, current)
     }
     return current

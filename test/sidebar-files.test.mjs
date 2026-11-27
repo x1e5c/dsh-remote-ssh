@@ -470,6 +470,7 @@ test('client.js routes workspaceFiles (list/read/readBytes) by sessionId with la
     clearInterval,
     queueMicrotask,
     Uint8Array,
+    Response,
     CustomEvent: class CustomEvent { constructor(type, init) { this.type = type; this.detail = init?.detail } },
     window: {
       __ModuleLoader__: { load(def) { loadedModule = def } },
@@ -591,8 +592,47 @@ test('client.js routes workspaceFiles (list/read/readBytes) by sessionId with la
   assert.equal(statCalls.length, 1)
   assert.equal(statCalls[0].path, '/root/data/src/index.js')
 
+  // dsh-better-sidebar's own listing API (/sidebar/api/fs.tree|fs.trees) reads
+  // the local disk. For a remote workspace it must be bridged onto filesList,
+  // otherwise its tree renders the stale local handle directory.
+  const rootLocal = 'C:\\Users\\t\\.dsh\\remote-ssh\\agent-workspaces\\bbbb'
+  const treeResponse = await sandbox.fetch('/sidebar/api/fs.tree', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionId: 'sess-b', cwd: rootLocal, path: rootLocal }),
+  })
+  const treeEnvelope = await treeResponse.json()
+  assert.equal(treeEnvelope.ok, true)
+  assert.deepEqual(
+    treeEnvelope.value.entries.map((entry) => `${entry.name}:${entry.isDir}`),
+    ['src:true', 'README.md:false'],
+  )
+  assert.equal(treeEnvelope.value.entries[0].path, `${rootLocal}\\src`)
+  assert.equal(listCalls.at(-1).path, '/root/data')
+
+  const batchResponse = await sandbox.fetch('/sidebar/api/fs.trees', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionId: 'sess-b', cwd: rootLocal, paths: [rootLocal, `${rootLocal}\\src`] }),
+  })
+  const batchEnvelope = await batchResponse.json()
+  assert.equal(batchEnvelope.ok, true)
+  assert.deepEqual(batchEnvelope.value.levels.map((level) => level.path), [rootLocal, `${rootLocal}\\src`])
+  assert.deepEqual(batchEnvelope.value.levels[1].entries.map((entry) => entry.name), ['index.js'])
+
+  // A path outside every remote workspace keeps the untouched host route.
+  await assert.rejects(
+    sandbox.fetch('/sidebar/api/fs.tree', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: 'C:\\local\\workspace' }),
+    }),
+    /unexpected fetch/,
+  )
+
   // betterSidebar.matchFileViewer is patched while active and restored on cleanup.
   assert.notEqual(betterSidebar.matchFileViewer, originalMatch)
   for (const cleanup of effects) cleanup()
   assert.equal(betterSidebar.matchFileViewer, originalMatch)
+  assert.equal(sandbox.fetch, fetchMock)
 })

@@ -137,40 +137,6 @@ window.__ModuleLoader__.load({
         'workspace.pathHelp': '必须是远程主机上已存在的绝对路径。',
         'workspace.modeHelp': '标准 / PTC / 极简会在运行时从 DSH 本体对应预设动态派生，自动跟随本体更新。',
         'workspace.noHost': '先添加 SSH 主机。',
-        'files.title': '远程文件',
-        'files.subtitle': '直接浏览 SSH 远程目录；文件只按需读取预览，不复制到本地。',
-        'files.workspace': '远程工作区',
-        'files.refresh': '刷新',
-        'files.up': '上一级',
-        'files.loading': '正在读取远程目录…',
-        'files.empty': '这个目录是空的。',
-        'files.noWorkspace': '还没有远程 Agent 工作区。点击侧栏底部“远程工作区”创建。',
-        'files.preview': '预览',
-        'files.binary': '这是二进制文件，暂不预览。',
-        'files.truncated': '只显示前 {count} 行；文件较大，可继续分页读取。',
-        'files.size': '{size}',
-        'files.error': '读取远程文件失败。',
-        'files.path': '路径',
-        'files.lines': '{count} 行',
-        'files.search': '按文件名筛选…',
-        'files.noMatch': '没有匹配的文件。',
-        'files.loadMore': '加载更多',
-        'files.loaded': '已加载 {count} 行',
-        'files.end': '已到文件末尾',
-        'files.loadingMore': '正在加载更多…',
-        'files.table': '表格预览',
-        'files.edit': '编辑',
-        'files.save': '保存',
-        'files.cancel': '取消',
-        'files.saving': '正在保存…',
-        'files.download': '下载完整文件',
-        'files.downloading': '正在下载…',
-        'files.cancelDownload': '取消下载',
-        'files.downloaded': '已下载',
-        'files.downloadFailed': '下载失败',
-        'files.saved': '已保存',
-        'files.readOnly': '文件较大，仅支持预览。',
-        'files.editTooLarge': '文件超过 256KB 或 1000 行，暂不支持编辑。',
         'mirror.busy': '正在同步远程会话…',
         'mirror.done': '已同步 {mirrored} 个远程会话（跳过 {skipped} 个）。在本地工作区侧栏查看“远程 · …”。',
         'mirror.failed': '同步完成，但 {failed} 个会话失败。',
@@ -413,40 +379,6 @@ window.__ModuleLoader__.load({
         'workspace.pathHelp': 'Must be an existing absolute path on the remote host.',
         'workspace.modeHelp': 'Standard / PTC / Minimal are dynamically derived at runtime from DSH built-in presets and follow upstream updates automatically.',
         'workspace.noHost': 'Add an SSH host first.',
-        'files.title': 'Remote files',
-        'files.subtitle': 'Browse the SSH directory directly; files are read on demand and are never copied locally.',
-        'files.workspace': 'Remote workspace',
-        'files.refresh': 'Refresh',
-        'files.up': 'Up',
-        'files.loading': 'Reading the remote directory…',
-        'files.empty': 'This directory is empty.',
-        'files.noWorkspace': 'No Remote Agent workspace yet. Use Remote workspace at the sidebar foot.',
-        'files.preview': 'Preview',
-        'files.binary': 'This is a binary file; preview is not available.',
-        'files.truncated': 'Showing the first {count} lines; the file is larger and can be paged.',
-        'files.size': '{size}',
-        'files.error': 'Could not read the remote file.',
-        'files.path': 'Path',
-        'files.lines': '{count} lines',
-        'files.search': 'Filter by file name…',
-        'files.noMatch': 'No matching files.',
-        'files.loadMore': 'Load more',
-        'files.loaded': '{count} lines loaded',
-        'files.end': 'End of file',
-        'files.loadingMore': 'Loading more…',
-        'files.table': 'Table preview',
-        'files.edit': 'Edit',
-        'files.save': 'Save',
-        'files.cancel': 'Cancel',
-        'files.saving': 'Saving…',
-        'files.download': 'Download full file',
-        'files.downloading': 'Downloading…',
-        'files.cancelDownload': 'Cancel download',
-        'files.downloaded': 'Downloaded',
-        'files.downloadFailed': 'Download failed',
-        'files.saved': 'Saved',
-        'files.readOnly': 'This file is too large to edit.',
-        'files.editTooLarge': 'Files over 256 KB or 1000 lines cannot be edited yet.',
         'mirror.busy': 'Syncing remote sessions…',
         'mirror.done': 'Synced {mirrored} remote sessions (skipped {skipped}). Look for “Remote · …” in the local workspace sidebar.',
         'mirror.failed': 'Sync finished with {failed} failed sessions.',
@@ -2248,24 +2180,6 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function FilesIcon({ size = 20, active = false }) {
-      return h('svg', {
-        width: size,
-        height: size,
-        viewBox: '0 0 24 24',
-        fill: 'none',
-        stroke: 'currentColor',
-        strokeWidth: active ? 2 : 1.7,
-        strokeLinecap: 'round',
-        strokeLinejoin: 'round',
-        'aria-hidden': true,
-        style: { display: 'block', opacity: active ? 1 : 0.85 },
-      },
-      h('path', { d: 'M3.5 6.5h5l2 2h10v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z' }),
-      h('path', { d: 'M3.5 9h17' }),
-      )
-    }
-
     function formatBytes(value) {
       const size = Number(value)
       if (!Number.isFinite(size) || size < 0) return ''
@@ -2274,466 +2188,31 @@ window.__ModuleLoader__.load({
       return size + ' B'
     }
 
-    function renderTablePreview(preview) {
-      const delimiter = /\.csv$/i.test(preview.path) ? ',' : '\t'
-      const rawLines = (preview.text || '').split(/\r?\n/)
-      while (rawLines.length > 1 && rawLines[rawLines.length - 1] === '') rawLines.pop()
-      if (rawLines.length === 0) return h('div', { className: 'rs-hint' }, '—')
-      const header = rawLines[0].split(delimiter)
-      const rows = rawLines.slice(1).map((line) => line.split(delimiter))
-      const cellStyle = {
-        borderBottom: '1px solid var(--dsw-alias-border-l1)',
-        padding: '3px 8px',
-        whiteSpace: 'nowrap',
-        verticalAlign: 'top',
+    // A remote log can be tens of megabytes. The sidebar file viewer keeps its
+    // tab mounted after the preview is closed, so an uncapped <pre> leaves a
+    // multi-megabyte text node in the document and every later layout
+    // invalidation re-measures it (CPU stays high with nothing else going on).
+    // Clamp what actually reaches the DOM.
+    const MAX_PREVIEW_CHARS = 200 * 1024
+    const MAX_PREVIEW_LINES = 4000
+
+    function clampPreviewText(value) {
+      const source = typeof value === 'string' ? value : ''
+      if (source === '') return { text: '', clamped: false }
+      let kept = source
+      let clamped = false
+      if (kept.length > MAX_PREVIEW_CHARS) {
+        const head = kept.slice(0, MAX_PREVIEW_CHARS)
+        const newline = head.lastIndexOf('\n')
+        kept = newline > 0 ? head.slice(0, newline) : head
+        clamped = true
       }
-      return h('div', { style: { overflow: 'auto', maxHeight: 'calc(100vh - 360px)' } },
-        h('table', { style: { borderCollapse: 'collapse', fontSize: 12, minWidth: 'max-content' } },
-          h('thead', null, h('tr', null, header.map((cell, index) => h('th', {
-            key: index,
-            style: {
-              position: 'sticky',
-              top: 0,
-              zIndex: 1,
-              background: 'var(--dsw-alias-bg-layer-1)',
-              borderBottom: '1px solid var(--dsw-alias-border-l2)',
-              padding: '4px 8px',
-              textAlign: 'left',
-              whiteSpace: 'nowrap',
-              fontWeight: 600,
-            },
-          }, cell || ' ')))),
-          h('tbody', null, rows.map((row, rowIndex) => h('tr', { key: rowIndex },
-            header.map((_, columnIndex) => h('td', { key: columnIndex, style: cellStyle }, row[columnIndex] ?? '')),
-          ))),
-        ),
-      )
-    }
-
-    function RemoteFilesPanel({ ctx, t }) {
-      const [workspaces, setWorkspaces] = useState([])
-      const [workspaceId, setWorkspaceId] = useState(null)
-      const [root, setRoot] = useState('')
-      const [path, setPath] = useState('')
-      const [search, setSearch] = useState('')
-      const [listing, setListing] = useState(null)
-      const [preview, setPreview] = useState(null)
-      const [loading, setLoading] = useState(false)
-      const [loadingMore, setLoadingMore] = useState(false)
-      const [editing, setEditing] = useState(false)
-      const [editText, setEditText] = useState('')
-      const [editVersion, setEditVersion] = useState('')
-      const [saving, setSaving] = useState(false)
-      const [saved, setSaved] = useState(false)
-      const [downloading, setDownloading] = useState(false)
-      const [downloadProgress, setDownloadProgress] = useState(0)
-      const [downloaded, setDownloaded] = useState(false)
-      const downloadControllerRef = useRef(null)
-      const requestSeqRef = useRef(0)
-      const [error, setError] = useState(null)
-
-      useEffect(() => () => {
-        requestSeqRef.current += 1
-        downloadControllerRef.current?.abort()
-      }, [])
-      useEffect(() => {
-        const url = preview?.imageUrl
-        return () => { if (url) URL.revokeObjectURL(url) }
-      }, [preview?.imageUrl])
-
-      const loadDir = useCallback(async (id, target) => {
-        if (!id) return
-        const seq = ++requestSeqRef.current
-        setLoading(true)
-        setError(null)
-        setPreview(null)
-        setEditing(false)
-        setSaved(false)
-        setSearch('')
-        try {
-          const result = await callApi('filesList', { workspaceId: id, path: target })
-          if (requestSeqRef.current !== seq) return
-          setListing(result)
-          setPath(result.path)
-          setRoot((current) => current || result.remotePath || '')
-        } catch (failure) {
-          if (requestSeqRef.current === seq) setError(failure)
-        } finally {
-          if (requestSeqRef.current === seq) setLoading(false)
-        }
-      }, [])
-
-      useEffect(() => {
-        let live = true
-        callApi('agentWorkspaces')
-          .then((payload) => {
-            if (!live) return
-            const list = Array.isArray(payload?.workspaces) ? payload.workspaces : []
-            setWorkspaces(list)
-            if (list[0]) {
-              setWorkspaceId(list[0].workspaceId)
-              setRoot(list[0].remotePath)
-              void loadDir(list[0].workspaceId, list[0].remotePath)
-            }
-          })
-          .catch((failure) => { if (live) setError(failure) })
-        return () => { live = false }
-      }, [loadDir])
-
-      const openEntry = async (entry) => {
-        if (entry.type === 'directory') {
-          await loadDir(workspaceId, entry.path)
-          return
-        }
-        const seq = ++requestSeqRef.current
-        setLoading(true)
-        setError(null)
-        setEditing(false)
-        setSaved(false)
-        try {
-          const imageMime = imageMimeForPath(entry.path)
-          if (imageMime) {
-            const image = await fetchRemoteFileBlob(workspaceId, entry.path)
-            if (requestSeqRef.current !== seq) return
-            const url = URL.createObjectURL(new Blob([image.blob], { type: imageMime }))
-            setPreview({
-              workspaceId,
-              path: entry.path,
-              size: image.size ?? image.blob.size ?? null,
-              version: null,
-              offset: 0,
-              nextOffset: 0,
-              lastPageFull: false,
-              text: '',
-              binary: false,
-              truncated: false,
-              lines: 0,
-              imageUrl: url,
-            })
-            return
-          }
-          const file = await callApi('filesRead', { workspaceId, path: entry.path, offset: 0, limit: 200 })
-          if (requestSeqRef.current !== seq) return
-          const hasMore = typeof file.hasMore === 'boolean'
-            ? file.hasMore
-            : typeof file.eof === 'boolean'
-              ? !file.eof
-              : file.lines >= 200
-          setPreview({ ...file, offset: 0, nextOffset: file.lines, lastPageFull: hasMore })
-        } catch (failure) {
-          if (requestSeqRef.current === seq) setError(failure)
-        } finally {
-          if (requestSeqRef.current === seq) setLoading(false)
-        }
+      const lines = kept.split(/\r?\n/)
+      if (lines.length > MAX_PREVIEW_LINES) {
+        kept = lines.slice(0, MAX_PREVIEW_LINES).join('\n')
+        clamped = true
       }
-
-      const loadMore = async () => {
-        if (!preview || preview.binary || preview.imageUrl || loadingMore) return
-        setLoadingMore(true)
-        setError(null)
-        try {
-          const next = Number.isSafeInteger(preview.nextOffset) ? preview.nextOffset : preview.offset + 200
-          const page = await callApi('filesRead', { workspaceId, path: preview.path, offset: next, limit: 200 })
-          const hasMore = typeof page.hasMore === 'boolean'
-            ? page.hasMore
-            : typeof page.eof === 'boolean'
-              ? !page.eof
-              : page.lines >= 200
-          setPreview((current) => current ? ({
-            ...page,
-            offset: current.offset,
-            nextOffset: next + page.lines,
-            lines: current.lines + page.lines,
-            text: current.text + (current.text && !current.text.endsWith('\n') ? '\n' : '') + page.text,
-            lastPageFull: hasMore,
-          }) : page)
-        } catch (failure) {
-          setError(failure)
-        } finally {
-          setLoadingMore(false)
-        }
-      }
-
-      const startEdit = async () => {
-        if (!preview || preview.binary || preview.imageUrl) return
-        if (preview.size > 256 * 1024) {
-          setError(new Error(t('files.editTooLarge')))
-          return
-        }
-        setLoading(true)
-        setError(null)
-        try {
-          const page = await callApi('filesRead', { workspaceId, path: preview.path, offset: 0, limit: 1000 })
-          if (page.binary || page.truncated || page.lines >= 1000) {
-            setError(new Error(t('files.editTooLarge')))
-            return
-          }
-          setEditing(true)
-          setEditText(page.text)
-          setEditVersion(page.version)
-          setSaved(false)
-        } catch (failure) {
-          setError(failure)
-        } finally {
-          setLoading(false)
-        }
-      }
-
-      const saveEdit = async () => {
-        if (!preview || saving) return
-        setSaving(true)
-        setError(null)
-        try {
-          await callApi('filesWrite', {
-            workspaceId,
-            path: preview.path,
-            content: editText,
-            version: editVersion,
-          })
-          setEditing(false)
-          setSaved(true)
-          const file = await callApi('filesRead', { workspaceId, path: preview.path, offset: 0, limit: 200 })
-          setPreview({ ...file, offset: 0, nextOffset: 200, lastPageFull: file.lines >= 200 })
-        } catch (failure) {
-          setError(failure)
-        } finally {
-          setSaving(false)
-        }
-      }
-
-      const downloadFull = async () => {
-        if (!preview || downloading) return
-        const controller = new AbortController()
-        downloadControllerRef.current = controller
-        setDownloading(true)
-        setDownloadProgress(0)
-        setDownloaded(false)
-        setError(null)
-        try {
-          const response = await fetch('/api/remote-ssh/filesDownload', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ workspaceId, path: preview.path }),
-            credentials: 'same-origin',
-            signal: controller.signal,
-          })
-          if (!response.ok) {
-            let detail = null
-            try {
-              const payload = await response.json()
-              detail = payload?.error?.message ?? null
-            } catch {
-              // ignore
-            }
-            throw new Error(detail || t('files.downloadFailed'))
-          }
-          const total = Number(response.headers.get('content-length'))
-            || Number(response.headers.get('x-remote-file-size'))
-            || preview.size
-          const reader = response.body?.getReader()
-          if (!reader) throw new Error(t('files.downloadFailed'))
-          const chunks = []
-          let received = 0
-          for (;;) {
-            const { done, value } = await reader.read()
-            if (done) break
-            chunks.push(value)
-            received += value.length
-            if (total > 0) setDownloadProgress(Math.min(100, Math.round((received / total) * 100)))
-          }
-          const blob = new Blob(chunks)
-          const url = URL.createObjectURL(blob)
-          const anchor = document.createElement('a')
-          anchor.href = url
-          anchor.download = preview.path.split('/').pop() || 'remote-file'
-          document.body.appendChild(anchor)
-          anchor.click()
-          anchor.remove()
-          setTimeout(() => URL.revokeObjectURL(url), 1000)
-          setDownloaded(true)
-          setDownloadProgress(100)
-        } catch (failure) {
-          if (failure?.name !== 'AbortError') setError(failure)
-        } finally {
-          setDownloading(false)
-          downloadControllerRef.current = null
-        }
-      }
-
-      const goUp = () => {
-        if (!listing || !root) return
-        const normalizedRoot = root.replace(/\/+$/, '') || '/'
-        const currentPath = String(listing.path ?? '').replace(/\/+$/, '') || '/'
-        if (currentPath === normalizedRoot) return
-        const parent = currentPath.replace(/\/[^/]+$/, '') || '/'
-        const withinRoot = normalizedRoot === '/'
-          || parent === normalizedRoot
-          || parent.startsWith(`${normalizedRoot}/`)
-        void loadDir(workspaceId, withinRoot ? parent : normalizedRoot)
-      }
-
-      const switchWorkspace = (id) => {
-        const item = workspaces.find((candidate) => candidate.workspaceId === id)
-        setWorkspaceId(id)
-        setRoot(item?.remotePath ?? '')
-        setListing(null)
-        setPreview(null)
-        setEditing(false)
-        setSaved(false)
-        void loadDir(id, item?.remotePath ?? '.')
-      }
-
-      const entries = listing?.entries ?? []
-      const query = search.trim().toLowerCase()
-      const visibleEntries = query === ''
-        ? entries
-        : entries.filter((entry) => entry.name.toLowerCase().includes(query))
-      const errorText = error ? (typeof error.message === 'string' ? error.message : t('files.error')) : null
-      const isTable = Boolean(preview && !preview.binary && /\.(tsv|csv)$/i.test(preview.path))
-
-      return h('div', { className: 'rs-page' },
-        h('div', { className: 'rs-wrap', style: { maxWidth: '1200px', display: 'flex', flexDirection: 'column', minHeight: 0 } },
-          h('div', { className: 'rs-head', style: { paddingBottom: 12 } },
-            h('div', null,
-              h('h1', { className: 'rs-title' }, t('files.title')),
-              h('p', { className: 'rs-sub' }, t('files.subtitle')),
-            ),
-            h('div', { className: 'rs-head-actions' },
-              h('button', { type: 'button', className: 'rs-btn', disabled: !listing, onClick: goUp }, t('files.up')),
-              h('button', { type: 'button', className: 'rs-btn', disabled: !workspaceId || loading, onClick: () => loadDir(workspaceId, path) }, t('files.refresh')),
-            ),
-          ),
-          workspaces.length === 0
-            ? h('div', { className: 'rs-empty' }, t('files.noWorkspace'))
-            : h(React.Fragment, null,
-              h('div', { className: 'dsh-remote-files-toolbar' },
-                h('span', { className: 'rs-meta', style: { margin: 0 } }, t('files.workspace')),
-                h('select', {
-                  className: 'rs-select',
-                  value: workspaceId ?? '',
-                  onChange: (event) => switchWorkspace(event.target.value),
-                  style: { maxWidth: 380, width: 'auto', minWidth: 220 },
-                }, workspaces.map((item) => h('option', { key: item.workspaceId, value: item.workspaceId }, item.title))),
-                h('code', { className: 'rs-target', style: { marginLeft: 'auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, path || root),
-              ),
-              errorText ? h('div', { className: 'rs-error', style: { marginBottom: 10 } }, errorText) : null,
-              h('div', { style: { display: 'grid', gridTemplateColumns: '320px minmax(0,1fr)', gap: 14, minHeight: 0, flex: 1 } },
-                h('div', { className: 'rs-card', style: { padding: 8, minHeight: 240, maxHeight: 'calc(100vh - 250px)', overflow: 'auto' } },
-                  h('input', {
-                    className: 'rs-input',
-                    value: search,
-                    onChange: (event) => setSearch(event.target.value),
-                    placeholder: t('files.search'),
-                    style: { marginBottom: 6 },
-                  }),
-                  loading && !listing
-                    ? h('div', { className: 'rs-hint' }, t('files.loading'))
-                    : entries.length === 0
-                      ? h('div', { className: 'rs-hint' }, t('files.empty'))
-                      : visibleEntries.length === 0
-                        ? h('div', { className: 'rs-hint' }, t('files.noMatch'))
-                        : h('div', { className: 'rs-list', style: { gap: 1 } }, visibleEntries.map((entry) => h('button', {
-                          key: entry.path,
-                          type: 'button',
-                          className: 'dsh-remote-file-row',
-                          'data-active': preview?.path === entry.path ? 'true' : undefined,
-                          onClick: () => openEntry(entry),
-                        },
-                        h('svg', { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, style: { flex: '0 0 auto', opacity: 0.7 } },
-                          entry.type === 'directory'
-                            ? h('path', { d: 'M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2h7.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z' })
-                            : h('path', { d: 'M6 3.5h7l5 5V20a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 6 20V4a.5.5 0 0 1 .5-.5zM13 3.5V9h5' }),
-                        ),
-                        h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, entry.name),
-                        entry.type === 'file' && Number.isFinite(entry.size)
-                          ? h('span', { className: 'dsh-remote-file-size' }, formatBytes(entry.size))
-                          : entry.type === 'directory'
-                            ? h('span', { className: 'dsh-remote-file-size' }, '›')
-                            : null,
-                        ))),
-                ),
-                h('div', { className: 'rs-card', style: { minHeight: 240, maxHeight: 'calc(100vh - 250px)', overflow: 'auto', padding: 12 } },
-                  preview
-                    ? h(React.Fragment, null,
-                      h('div', { className: 'rs-meta', style: { marginTop: 0, marginBottom: 8, gap: 8, alignItems: 'center' } },
-                        h('code', { className: 'rs-target' }, preview.path),
-                        h('span', null, formatBytes(preview.size)),
-                        preview.imageUrl ? null : h('span', null, t('files.lines').replace('{count}', String(preview.lines))),
-                        isTable ? h('span', { className: 'rs-badge' }, t('files.table')) : null,
-                        saved ? h('span', { className: 'rs-hint', style: { margin: 0 } }, t('files.saved')) : null,
-                        downloaded ? h('span', { className: 'rs-hint', style: { margin: 0 } }, t('files.downloaded')) : null,
-                        downloading
-                          ? h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', marginLeft: 'auto' } },
-                            h('span', { className: 'rs-hint', style: { margin: 0 } }, String(downloadProgress) + '%'),
-                            h('div', { style: { width: 80, height: 6, borderRadius: 3, background: 'var(--dsw-alias-bg-layer-2)', overflow: 'hidden' } },
-                              h('div', { style: { width: String(downloadProgress) + '%', height: '100%', background: 'var(--dsw-alias-brand-primary)' } }),
-                            ),
-                            h('button', { type: 'button', className: 'rs-btn', onClick: () => downloadControllerRef.current?.abort() }, t('files.cancelDownload')),
-                          )
-                          : !editing
-                            ? h('button', { type: 'button', className: 'rs-btn', style: { marginLeft: 'auto' }, onClick: downloadFull }, t('files.download'))
-                            : null,
-                        !preview.binary && !preview.imageUrl && !editing && preview.size <= 256 * 1024
-                          ? h('button', { type: 'button', className: 'rs-btn', disabled: loading, onClick: startEdit }, t('files.edit'))
-                          : null,
-                        editing
-                          ? h(React.Fragment, null,
-                            h('button', { type: 'button', className: 'rs-btn rs-btn-primary', disabled: saving, onClick: saveEdit }, saving ? t('files.saving') : t('files.save')),
-                            h('button', { type: 'button', className: 'rs-btn', disabled: saving, onClick: () => { setEditing(false); setSaved(false) } }, t('files.cancel')),
-                          )
-                          : null,
-                      ),
-                      editing
-                        ? h('textarea', {
-                          value: editText,
-                          onChange: (event) => setEditText(event.target.value),
-                          spellCheck: false,
-                          style: {
-                            width: '100%',
-                            minHeight: 360,
-                            boxSizing: 'border-box',
-                            resize: 'vertical',
-                            fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
-                            fontSize: 12,
-                            lineHeight: 1.55,
-                            padding: 10,
-                            borderRadius: 8,
-                            border: '1px solid var(--dsw-alias-border-l1)',
-                            background: 'var(--dsw-alias-bg-base)',
-                            color: 'var(--dsw-alias-label-primary)',
-                          },
-                        })
-                        : preview.imageUrl
-                          ? h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 240, background: 'var(--dsw-alias-bg-layer-1)', borderRadius: 8, padding: 12 } },
-                            h('img', {
-                              src: preview.imageUrl,
-                              alt: String(preview.path || 'remote image').split('/').pop() || 'remote image',
-                              style: { display: 'block', maxWidth: '100%', maxHeight: 'calc(100vh - 340px)', objectFit: 'contain' },
-                            }),
-                          )
-                          : preview.binary
-                            ? h('div', { className: 'rs-hint' }, t('files.binary'))
-                            : isTable
-                              ? renderTablePreview(preview)
-                              : h('pre', { style: { margin: 0, fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace', fontSize: 12, lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--dsw-alias-label-primary)' } }, preview.text || ''),
-                      preview.truncated && !editing
-                        ? h('div', { className: 'rs-hint' }, t('files.truncated').replace('{count}', '200'))
-                        : null,
-                      !preview.binary && !preview.imageUrl && !editing
-                        ? h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 10 } },
-                          preview.lastPageFull
-                            ? h('button', { type: 'button', className: 'rs-btn', disabled: loadingMore, onClick: loadMore }, loadingMore ? t('files.loadingMore') : t('files.loadMore'))
-                            : h('span', { className: 'rs-hint' }, t('files.end')),
-                          h('span', { className: 'rs-hint' }, t('files.loaded').replace('{count}', String(preview.lines))),
-                        )
-                        : null,
-                    )
-                    : h('div', { className: 'rs-hint' }, loading ? t('files.loading') : t('files.preview')),
-                ),
-              ),
-            ),
-        ),
-      )
+      return { text: kept, clamped }
     }
 
     function PanelIcon({ size = 20, active = false }) {
@@ -3118,7 +2597,7 @@ window.__ModuleLoader__.load({
       return []
     }
 
-    function isWorkspaceRemoteForSession(ctx, sessionId, currentPreset) {
+    function isWorkspaceRemoteForSession(ctx, sessionId) {
       const sessions = typeof ctx?.get === 'function' ? ctx.get('sessions') : ctx?.sessions
       const workspaces = typeof ctx?.get === 'function' ? ctx.get('workspaces') : ctx?.workspaces
       const sessionById = sessions?.list?.getSnapshot?.()?.byId ?? null
@@ -3142,12 +2621,8 @@ window.__ModuleLoader__.load({
           if (typeof matchedWs.path === 'string' && matchedWs.path !== '') return false
         }
         if (typeof summary.cwd === 'string' && summary.cwd !== '') return false
-        const projectedPreset = summary.projectionValues?.agentPreset
-        if (typeof projectedPreset === 'string' && projectedPreset !== '') {
-          return projectedPreset.startsWith('remote-')
-        }
       }
-      return typeof currentPreset === 'string' && currentPreset.startsWith('remote-')
+      return false
     }
 
     function installPresetSeatFilter(ctx) {
@@ -3174,7 +2649,7 @@ window.__ModuleLoader__.load({
           getSnapshot() {
             const raw = rawStore.getSnapshot()
             if (!raw || !Array.isArray(raw.options)) return raw
-            const isRemote = isWorkspaceRemoteForSession(ctx, sessionId, raw.current)
+            const isRemote = isWorkspaceRemoteForSession(ctx, sessionId)
             if (raw === cachedRaw && isRemote === cachedRemote && cachedResult !== null) {
               return cachedResult
             }
@@ -3183,9 +2658,15 @@ window.__ModuleLoader__.load({
               return isRemote ? id.startsWith('remote-') : !id.startsWith('remote-')
             })
             const options = matching.length > 0 ? matching : raw.options
+            let current = raw.current
+            if (!isRemote && typeof current === 'string' && current.startsWith('remote-') && matching.length > 0) {
+              current = matching.find((option) => option?.id === 'standard')?.id ?? matching[0]?.id ?? current
+            }
             cachedRaw = raw
             cachedRemote = isRemote
-            cachedResult = options.length === raw.options.length ? raw : { ...raw, options }
+            cachedResult = options.length === raw.options.length && current === raw.current
+              ? raw
+              : { ...raw, options, current }
             return cachedResult
           },
           subscribe(listener) {
@@ -3409,6 +2890,182 @@ window.__ModuleLoader__.load({
           throw failure
         })
       return nativeWorkspaceList.promise
+    }
+
+    // dsh-better-sidebar reads the local disk through its own host API
+    // (`/sidebar/api/fs.tree` and `fs.trees`). A remote workspace's session cwd
+    // is the local handle directory under ~/.dsh/remote-ssh/agent-workspaces, so
+    // its tree rendered stale placeholder rows instead of the remote directory.
+    // Redirect just those two listing methods onto the plugin's SSH-backed
+    // route; every other request stays untouched.
+    function isAbsoluteLocalPath(value) {
+      return /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('/') || value.startsWith('\\')
+    }
+
+    function absoluteLocalPath(value, cwd) {
+      const raw = String(value ?? '')
+      if (raw === '') return String(cwd ?? '')
+      if (isAbsoluteLocalPath(raw)) return raw
+      if (raw === '~' || raw.startsWith('~/') || raw.startsWith('~\\')) return ''
+      const base = String(cwd ?? '')
+      if (base === '') return ''
+      const sep = base.includes('\\') ? '\\' : '/'
+      return `${base.replace(/[\\/]+$/, '')}${sep}${raw.replace(/^[\\/]+/, '')}`
+    }
+
+    function localEntryPath(directory, name) {
+      const base = String(directory ?? '')
+      if (base === '') return name
+      const sep = base.includes('\\') ? '\\' : '/'
+      return `${base.replace(/[\\/]+$/, '')}${sep}${name}`
+    }
+
+    function remoteListingTarget(localPath, workspaces) {
+      const normalized = String(localPath ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
+      if (normalized === '') return null
+      let best = null
+      for (const workspace of workspaces) {
+        const root = String(workspace?.path ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
+        if (!root) continue
+        if (normalized !== root && !normalized.startsWith(`${root}/`)) continue
+        if (!best || root.length > best.root.length) best = { workspace, root }
+      }
+      if (!best) return null
+      const relative = normalized.slice(best.root.length).replace(/^\/+/, '')
+      const base = String(best.workspace.remotePath ?? '').replace(/\/+$/, '')
+      return {
+        workspaceId: best.workspace.workspaceId,
+        remotePath: relative === '' ? (base || '/') : `${base}/${relative}`,
+        // Keep the caller's own separators: the synthesized entry paths feed
+        // straight back into the tree (and into mirror-path matching).
+        directory: String(localPath ?? ''),
+      }
+    }
+
+    async function listRemoteLevel(target, signal) {
+      const listed = await callApi('filesList', { workspaceId: target.workspaceId, path: target.remotePath }, { signal })
+      const entries = Array.isArray(listed?.entries) ? listed.entries : []
+      return {
+        entries: entries
+          .map((entry) => ({
+            name: String(entry?.name ?? ''),
+            path: localEntryPath(target.directory, String(entry?.name ?? '')),
+            isDir: entry?.type === 'directory',
+            hidden: String(entry?.name ?? '').startsWith('.'),
+            isSymlink: false,
+            broken: false,
+          }))
+          .filter((entry) => entry.name !== ''),
+        truncated: Boolean(listed?.truncated),
+      }
+    }
+
+    function sidebarJsonResponse(body, status = 200) {
+      return new Response(JSON.stringify(body), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+
+    async function bridgeSidebarListing(method, init) {
+      if (typeof init?.body !== 'string') return null
+      let payload
+      try {
+        payload = JSON.parse(init.body)
+      } catch {
+        return null
+      }
+      if (!payload || typeof payload !== 'object') return null
+      const cwd = typeof payload.cwd === 'string' ? payload.cwd : ''
+      const requested = method === 'fs.trees'
+        ? (Array.isArray(payload.paths) ? payload.paths : []).filter((value) => typeof value === 'string' && value !== '')
+        : [typeof payload.path === 'string' && payload.path !== '' ? payload.path : cwd]
+      if (requested.length === 0) return null
+      let workspaces
+      try {
+        workspaces = await loadNativeWorkspaces()
+      } catch {
+        return null
+      }
+      const resolved = requested.map((value) => {
+        const absolute = absoluteLocalPath(value, cwd)
+        return { value, absolute, target: absolute === '' ? null : remoteListingTarget(absolute, workspaces) }
+      })
+      // A tree belongs to exactly one workspace: take over only when every
+      // requested level is remote, otherwise let the host answer all of it.
+      if (!resolved.every((item) => item.target)) return null
+      const signal = init.signal ?? undefined
+      try {
+        signal?.throwIfAborted?.()
+        if (method === 'fs.tree') {
+          const item = resolved[0]
+          const level = await listRemoteLevel(item.target, signal)
+          return sidebarJsonResponse({
+            ok: true,
+            value: { path: item.absolute, entries: level.entries, truncated: level.truncated },
+          })
+        }
+        // One POST lists every expanded level; keep the SSH fan-out bounded.
+        const levels = new Array(resolved.length)
+        let cursor = 0
+        const worker = async () => {
+          for (;;) {
+            const index = cursor
+            cursor += 1
+            if (index >= resolved.length) return
+            const item = resolved[index]
+            try {
+              const level = await listRemoteLevel(item.target, signal)
+              levels[index] = { path: item.value, entries: level.entries, truncated: level.truncated }
+            } catch (failure) {
+              levels[index] = {
+                path: item.value,
+                entries: [],
+                truncated: false,
+                error: failure instanceof Error ? failure.message : String(failure),
+              }
+            }
+          }
+        }
+        await Promise.all(Array.from({ length: Math.min(3, resolved.length) }, () => worker()))
+        return sidebarJsonResponse({ ok: true, value: { levels } })
+      } catch (failure) {
+        return sidebarJsonResponse({
+          ok: false,
+          error: { code: 'remote-ssh-bridge', message: failure instanceof Error ? failure.message : String(failure) },
+        }, 502)
+      }
+    }
+
+    function installBetterSidebarFsBridge() {
+      const host = typeof window !== 'undefined' && typeof window.fetch === 'function'
+        ? window
+        : (typeof globalThis !== 'undefined' && typeof globalThis.fetch === 'function' ? globalThis : null)
+      if (!host) return () => {}
+      const originalFetch = host.fetch
+      if (originalFetch.__dshRemoteSshSidebarBridge) return () => {}
+      const bridged = async function (input, init) {
+        try {
+          const url = typeof input === 'string'
+            ? input
+            : input instanceof URL ? input.href : input?.url
+          if (typeof url === 'string' && url.includes('/sidebar/api/')) {
+            const method = url.split('/sidebar/api/')[1]?.split(/[?#]/)[0]
+            if (method === 'fs.tree' || method === 'fs.trees') {
+              const response = await bridgeSidebarListing(method, init)
+              if (response) return response
+            }
+          }
+        } catch {
+          // Fall through to the untouched request (also covers aborts).
+        }
+        return originalFetch.call(this, input, init)
+      }
+      bridged.__dshRemoteSshSidebarBridge = true
+      host.fetch = bridged
+      return () => {
+        if (host.fetch === bridged) host.fetch = originalFetch
+      }
     }
 
     function normalizePosixPath(value) {
@@ -3773,12 +3430,14 @@ window.__ModuleLoader__.load({
             }
             const read = await callApi('filesRead', { workspaceId: target.workspaceId, path: target.path, offset: 0, limit: 1000 }, { signal: controller.signal })
             if (!alive) return
+            // Clamp before storing: this text node can outlive the preview tab.
+            const view = clampPreviewText(read.text)
             setState({
               loading: false,
               error: null,
-              text: read.text ?? '',
+              text: view.text,
               binary: Boolean(read.binary),
-              truncated: Boolean(read.truncated) || read.hasMore === true || read.eof === false,
+              truncated: view.clamped || Boolean(read.truncated) || read.hasMore === true || read.eof === false,
               target: target.label,
               remotePath: target.path,
               imageUrl: null,
@@ -4441,12 +4100,6 @@ window.__ModuleLoader__.load({
 .dsh-remote-dialog-sub{margin:4px 0 0;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-secondary)}
 .dsh-remote-dialog-body{padding:14px 18px;overflow:auto;display:flex;flex-direction:column;gap:10px;min-height:0}
 .dsh-remote-dialog-footer{display:flex;align-items:center;gap:8px;padding:12px 18px;border-top:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1)}
-.dsh-remote-files-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1);margin-bottom:12px}
-.dsh-remote-file-row{display:flex;align-items:center;gap:8px;width:100%;height:30px;padding:0 8px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:12.5px;text-align:left;cursor:pointer}
-.dsh-remote-file-row:hover{background:var(--dsw-alias-bg-layer-2)}
-.dsh-remote-file-row:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}
-.dsh-remote-file-row[data-active="true"]{background:var(--dsw-alias-bg-layer-2)}
-.dsh-remote-file-size{margin-left:auto;font-size:11px;color:var(--dsw-alias-label-secondary);flex:0 0 auto}
 .dsh-remote-import-overlay{position:fixed;inset:0;z-index:1400;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;padding:20px}
 .dsh-remote-import-dialog{width:min(820px,94vw);max-height:88vh}
 .dsh-remote-session-list{display:flex;flex-direction:column;gap:6px;min-height:0}
@@ -4529,26 +4182,23 @@ window.__ModuleLoader__.load({
             return () => {}
           }
         }, 'remote-ssh: native workspace files bridge')
+        ctx.effect(() => {
+          try {
+            return installBetterSidebarFsBridge()
+          } catch {
+            return () => {}
+          }
+        }, 'remote-ssh: better sidebar fs bridge')
         ctx.slots.inject('main', () => ctx.slots.register({
           name: 'main',
           key: 'remote-ssh',
         }, () => h(RemoteWorkspacesPage, { ctx, t })))
-        ctx.slots.inject('main', () => ctx.slots.register({
-          name: 'main',
-          key: 'remote-files',
-        }, () => h(RemoteFilesPanel, { ctx, t })))
         ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
           name: 'sidebar.panellist',
           id: 'remote-ssh',
           order: 30,
           label: () => t('title'),
         }, PanelIcon))
-        ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
-          name: 'sidebar.panellist',
-          id: 'remote-files',
-          order: 31,
-          label: () => t('files.title'),
-        }, FilesIcon))
         ctx.slots.inject('shell.overlay', () => ctx.slots.register({
           name: 'shell.overlay',
           id: 'remote-workspace-host',

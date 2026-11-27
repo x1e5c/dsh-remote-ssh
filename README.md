@@ -25,7 +25,7 @@
 - **不启动远程 dsh**：没有远程 profile、代理或嵌入 UI；远程 dsh 的历史会话可以手动导入本地，导入后仍由本地 agent 驱动；
 - **只把工具执行搬到远程**：agent 仍然在本地，模型、上下文、审批、会话历史都在本地；
 - **工作区就是远程目录**：新建远程工作区后，当前会话的 fs / shell / terminal 自动绑定到该主机和目录；
-- **保留 DSH 的交互方式**：会话、工作区切换、Remote Files、文件树、终端都还在同一个 UI 里。
+- **保留 DSH 的交互方式**：会话、工作区切换、文件树、终端都还在同一个 UI 里。
 
 ## 功能
 
@@ -59,18 +59,6 @@
 
 默认使用 `remote-standard`。所有 `remote-*` preset 均由 `lib/preset-deriver.js` 在运行时基于 DSH 当前生效的预设自动派生（排除 `cordis` 创建者模式，并支持跟随热重载与自定义预设）；每个 session 根据工作区路径解析实际远程目标。
 
-### Remote Files
-
-侧栏 **Remote files** 提供远程文件操作：
-
-- 浏览远程目录；
-- 文件名筛选；
-- 文本预览与分页；
-- TSV / CSV 表格预览；
-- 编辑小文件（带版本校验）；
-- 流式下载完整文件；
-- 进度与取消。
-
 ### 文件树与远程内容
 
 右侧原生文件树通过 `workspaceFiles` 桥接**按需逐级列目录**（不在本地磁盘生成全量镜像）：
@@ -81,6 +69,8 @@
 - PNG / JPEG / GIF / WebP / SVG 等图片直接在侧边栏中预览（按需通过 SSH 下载原始字节，带体积上限保护）。
 
 这样既保留了 DSH 原生文件树的导航体验，又避免了大仓库全量同步、Windows 大小写/非法字符冲突以及过期目录问题。
+
+安装 `dsh-better-sidebar` 时，右侧栏目录树自带一套 Host 文件 API（`/sidebar/api/fs.tree`），默认直接读本地磁盘；插件会在客户端把它的目录列表请求桥接回本插件的 SSH 路由，因此远程工作区的树显示的是远端当前目录，而不是本地句柄目录里残留的旧占位文件。打开文件仍走本插件的远程预览（`fetchStrategy: none`），不会再读本地占位内容。
 
 ### 对话中的文件预览
 
@@ -219,7 +209,7 @@ Remote SSH 页面提供 **沙箱日志** 按钮，显示 `sandbox=bwrap|none`、
 4. 点 **Add Workspace**（加号）→ **添加远程工作区**；
 5. 选择主机与远程目录；
 6. 创建并打开远程工作区；
-7. 在 Remote Files、文件树、终端或对话中使用远程工具；
+7. 在文件树、终端或对话中使用远程工具；
 8. 如果要继续远程机器上已有的 dsh 会话，回 **Remote SSH** 页点主机的 **导入会话**。
 
 ## 项目结构
@@ -227,7 +217,7 @@ Remote SSH 页面提供 **沙箱日志** 按钮，显示 `sandbox=bwrap|none`、
 ```text
 dsh-remote-ssh/
 ├─ index.js                  # Host routes / plugin entry
-├─ client.js                 # Web UI（工作区菜单、Remote SSH 页、Remote Files、对话框、viewer）
+├─ client.js                 # Web UI（工作区菜单、Remote SSH 页、对话框、viewer）
 ├─ cordis.patch.yml          # bundle patch：Host 插件与 terminal group（remote-* preset 由运行时动态派生）
 ├─ lib/
 │  ├─ controller.js          # 主机、工作区、binding、文件路由、沙箱检测、会话导入
@@ -285,8 +275,9 @@ Windows 下某些测试可能遇到 `spawn EPERM`，这是 DSH 沙箱对子进�
 ## 限制
 
 - 远程没有 DSH 的 OS sandbox；bwrap 是可选的额外隔离，且依赖远程内核/用户命名空间；
-- bwrap 只覆盖远程 bash / terminal；远程 fs 工具仍是 direct SSH；
+- 启用 bwrap 时，`bash` 和远程工作区内的 `write` / `edit` 自动免确认（写入前校验 `realpath` 防止软链逃逸）；工作区外的文件修改仍会弹窗确认；
 - 文件树按需只查询当前展开目录的一级条目，首次展开子目录会有一次 SSH 往返；
+- `dsh-better-sidebar` 的目录监听仍基于本地路径，远端新增/删除文件后需要点一次树的刷新（或重新展开目录）才会出现；
 - 会话导入是手动快照，不是持续同步；导入后远程新消息不会自动出现在本地；
 - 远程连接按操作建立，不是持久 ControlMaster；
 - 远程路径、目录大小、下载大小与 SSH 延迟都会影响体验；
