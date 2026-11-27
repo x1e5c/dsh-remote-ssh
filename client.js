@@ -3069,6 +3069,35 @@ window.__ModuleLoader__.load({
       }
     }
 
+    // Resolve any sidebar path to a remote target. Accepts the local handle path
+    // (tree rows), a POSIX absolute remote path (chat links written as
+    // /home/...), and the Windows-mangled "\home\..." form DSH produces from a
+    // POSIX path. The handle-path match wins when both could apply.
+    function remoteTargetForPath(value, workspaces) {
+      const local = remoteListingTarget(value, workspaces)
+      if (local) return local
+      const raw = String(value ?? '').replace(/\\/g, '/')
+      if (raw === '' || /^[A-Za-z]:\//.test(raw) || !raw.startsWith('/')) return null
+      let clean = raw
+      try {
+        clean = normalizePosixPath(raw)
+      } catch {
+        clean = raw
+      }
+      let best = null
+      for (const workspace of workspaces) {
+        const root = String(workspace?.remotePath ?? '').replace(/\/+$/, '') || '/'
+        if (root !== '/' && clean !== root && !clean.startsWith(`${root}/`)) continue
+        if (!best || root.length > best.root.length) best = { workspace, root }
+      }
+      if (!best) return null
+      return {
+        workspaceId: best.workspace.workspaceId,
+        remotePath: clean,
+        directory: String(value ?? ''),
+      }
+    }
+
     async function listRemoteLevel(target, signal) {
       const listed = await callApi('filesList', { workspaceId: target.workspaceId, path: target.remotePath }, { signal })
       const entries = Array.isArray(listed?.entries) ? listed.entries : []
@@ -3116,7 +3145,7 @@ window.__ModuleLoader__.load({
       }
       const resolved = requested.map((value) => {
         const absolute = absoluteLocalPath(value, cwd)
-        return { value, absolute, target: absolute === '' ? null : remoteListingTarget(absolute, workspaces) }
+        return { value, absolute, target: absolute === '' ? null : remoteTargetForPath(absolute, workspaces) }
       })
       // A tree belongs to exactly one workspace: take over only when every
       // requested level is remote, otherwise let the host answer all of it.
@@ -3200,7 +3229,7 @@ window.__ModuleLoader__.load({
       } catch {
         return null
       }
-      const target = remoteListingTarget(absolute, workspaces)
+      const target = remoteTargetForPath(absolute, workspaces)
       return target ? { target, requested } : null
     }
 
@@ -3313,7 +3342,7 @@ window.__ModuleLoader__.load({
       } catch {
         return null
       }
-      return remoteListingTarget(localPath, workspaces) ? localPath : null
+      return remoteTargetForPath(localPath, workspaces) ? localPath : null
     }
 
     function installBetterSidebarFsBridge() {      const host = typeof window !== 'undefined' && typeof window.fetch === 'function'

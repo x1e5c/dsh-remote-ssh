@@ -1,6 +1,6 @@
 {
   "name": "dsh-remote-ssh",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "private": true,
   "description": "Remote SSH workspaces inside DSH: local agent/session/approvals, remote fs/shell/jobs.",
   "license": "MIT",

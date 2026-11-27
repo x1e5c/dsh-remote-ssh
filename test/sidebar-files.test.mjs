@@ -657,8 +657,41 @@ test('client.js routes workspaceFiles (list/read/readBytes) by sessionId with la
   assert.equal(betterSidebar.matchFileViewer(`${rootLocal}\\data.csv`)?.id, 'dsh-remote-ssh:mirror-file')
   assert.equal(betterSidebar.matchFileViewer('C:\\local\\notes.md')?.id, 'markdown')
 
+  // Absolute remote paths (chat links) must resolve too, in both the POSIX form
+  // and the Windows-mangled "\root\..." form DSH produces on this platform.
+  const absoluteRead = await sandbox.fetch('/sidebar/api/fs.read', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionId: 'sess-b', cwd: rootLocal, path: '/root/data/README.md' }),
+  })
+  const absoluteEnvelope = await absoluteRead.json()
+  assert.equal(absoluteEnvelope.ok, true)
+  assert.match(absoluteEnvelope.value.content, /hello/)
+  assert.equal(downloadCalls.at(-1).path, '/root/data/README.md')
+
+  const mangledRead = await sandbox.fetch('/sidebar/api/fs.read', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionId: 'sess-b', cwd: rootLocal, path: '\\root\\data\\README.md' }),
+  })
+  const mangledEnvelope = await mangledRead.json()
+  assert.equal(mangledEnvelope.ok, true)
+  assert.match(mangledEnvelope.value.content, /hello/)
+
+  // A listing rooted at an absolute remote path lists the remote level.
+  const absoluteTree = await sandbox.fetch('/sidebar/api/fs.tree', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionId: 'sess-b', cwd: rootLocal, path: '/root/data/src' }),
+  })
+  const absoluteTreeEnvelope = await absoluteTree.json()
+  assert.equal(absoluteTreeEnvelope.ok, true)
+  assert.deepEqual(absoluteTreeEnvelope.value.entries.map((entry) => entry.name), ['index.js'])
+  assert.equal(listCalls.at(-1).path, '/root/data/src')
+
   // The sidebar's own write route is refused for remote paths (it would write
-  // the local handle file, not the remote one).
+  // the local handle file, not the remote one). The guard covers absolute
+  // remote paths as well.
   const writeResponse = await sandbox.fetch(
     `/sidebar/write?sessionId=sess-b&path=${encodeURIComponent(`${rootLocal}\\README.md`)}`,
     { method: 'POST', body: '# changed' },
@@ -667,6 +700,12 @@ test('client.js routes workspaceFiles (list/read/readBytes) by sessionId with la
   const writeEnvelope = await writeResponse.json()
   assert.equal(writeEnvelope.ok, false)
   assert.equal(writeEnvelope.error.code, 'forbidden')
+
+  const absoluteWrite = await sandbox.fetch(
+    `/sidebar/write?sessionId=sess-b&path=${encodeURIComponent('/root/data/README.md')}`,
+    { method: 'POST', body: '# changed' },
+  )
+  assert.equal(absoluteWrite.status, 403)
 
   // betterSidebar.matchFileViewer is patched while active and restored on cleanup.
   assert.notEqual(betterSidebar.matchFileViewer, originalMatch)
