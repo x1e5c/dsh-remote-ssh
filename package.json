@@ -42,6 +42,7 @@
     "lib/mirror.js",
     "lib/remote-api.js",
     "lib/remote-sessions.js",
+    "lib/preset-deriver.js",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",

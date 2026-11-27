@@ -40,9 +40,10 @@ export function createRemoteFileSystem(config, run = runRemote) {
     return run(cfg, script, options)
   }
 
-  async function stat(target, signal) {
+  async function runStat(target, followSymlinks, signal) {
     const path = target.targetKey
-    const result = await exec(`stat -c '%F|%s|%Y' -- ${shellQuote(path)}`, { signal, timeoutMs: 30000 })
+    const flag = followSymlinks ? ' -L' : ''
+    const result = await exec(`stat -c '%F|%s|%Y'${flag} -- ${shellQuote(path)}`, { signal, timeoutMs: 30000 })
     if (result.code !== 0) {
       const stderr = String(result.stderr ?? '')
       if (stderr.includes('No such file') || stderr.includes('cannot stat')) return undefined
@@ -51,11 +52,24 @@ export function createRemoteFileSystem(config, run = runRemote) {
     const [kind, sizeText, mtimeText] = result.stdout.trim().split('|')
     const size = Number(sizeText)
     const mtime = Number(mtimeText)
+    const type = kind === 'directory'
+      ? 'directory'
+      : kind === 'symbolic link'
+        ? 'symlink'
+        : 'file'
     return {
       version: `${Number.isFinite(mtime) ? mtime : 0}:${Number.isFinite(size) ? size : 0}`,
-      type: kind === 'directory' ? 'directory' : 'file',
+      type,
       size: Number.isFinite(size) ? size : 0,
     }
+  }
+
+  async function stat(target, signal) {
+    return runStat(target, true, signal)
+  }
+
+  async function lstat(target, signal) {
+    return runStat(target, false, signal)
   }
 
   async function readWhole(path, signal, maxBytes = 8 * 1024 * 1024) {
@@ -104,19 +118,38 @@ export function createRemoteFileSystem(config, run = runRemote) {
     if (!info) throw fsError(`cannot list "${target.displayPath}": not found`, 'FS_NOT_FOUND')
     if (info.type !== 'directory') throw fsError(`cannot list "${target.displayPath}": not a directory`, 'FS_NOT_DIRECTORY')
     const result = await exec(
-      `find ${shellQuote(target.targetKey)} -mindepth 1 -maxdepth 1 -printf '%f|%y|%s|%T@\\n'`,
+      `find ${shellQuote(target.targetKey)} -mindepth 1 -maxdepth 1 -printf '%f|%y|%Y|%s|%T@\\n'`,
       { signal, timeoutMs: 60000 },
     )
     if (result.code !== 0) throw fsError(`cannot list "${target.displayPath}": ${String(result.stderr ?? '').trim() || `exit ${result.code}`}`, 'FS_IO_ERROR')
     const entries = []
     for (const line of result.stdout.split(/\r?\n/)) {
       if (line === '') continue
-      const [entryName, kind, sizeText, mtimeText] = line.split('|')
+      const parts = line.split('|')
+      let entryName
+      let kind
+      let targetKind
+      let sizeText
+      let mtimeText
+      if (parts.length >= 5) {
+        [entryName, kind, targetKind, sizeText, mtimeText] = parts
+      } else {
+        [entryName, kind, sizeText, mtimeText] = parts
+        targetKind = kind
+      }
       if (!entryName) continue
+      const effectiveKind = kind === 'l' ? targetKind : kind
+      const type = effectiveKind === 'd'
+        ? 'directory'
+        : effectiveKind === 'f'
+          ? 'file'
+          : kind === 'l'
+            ? 'symlink'
+            : 'other'
       const path = posix.join(target.targetKey, entryName)
       entries.push({
         name: entryName,
-        type: kind === 'd' ? 'directory' : kind === 'l' ? 'symlink' : 'file',
+        type,
         target: { targetKey: path, displayPath: path },
         version: `${Number(mtimeText) || 0}:${Number(sizeText) || 0}`,
         size: Number(sizeText) || 0,
@@ -225,7 +258,7 @@ export function createRemoteFileSystem(config, run = runRemote) {
       return rel === '' || (!rel.startsWith('..') && !posix.isAbsolute(rel))
     },
     stat,
-    lstat: stat,
+    lstat,
     async readText(target, signal) {
       return readText(target, signal)
     },

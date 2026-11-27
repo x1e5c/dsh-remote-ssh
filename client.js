@@ -135,7 +135,7 @@ window.__ModuleLoader__.load({
         'workspace.created': '远程工作区已创建。',
         'workspace.failed': '创建远程工作区失败。',
         'workspace.pathHelp': '必须是远程主机上已存在的绝对路径。',
-        'workspace.modeHelp': '标准 / PTC / 极简对应静态 remote preset，不按工作区生成动态 preset。',
+        'workspace.modeHelp': '标准 / PTC / 极简会在运行时从 DSH 本体对应预设动态派生，自动跟随本体更新。',
         'workspace.noHost': '先添加 SSH 主机。',
         'files.title': '远程文件',
         'files.subtitle': '直接浏览 SSH 远程目录；文件只按需读取预览，不复制到本地。',
@@ -411,7 +411,7 @@ window.__ModuleLoader__.load({
         'workspace.created': 'Remote workspace created.',
         'workspace.failed': 'Could not create the remote workspace.',
         'workspace.pathHelp': 'Must be an existing absolute path on the remote host.',
-        'workspace.modeHelp': 'Standard / PTC / Minimal map to static remote presets; no dynamic preset is created per workspace.',
+        'workspace.modeHelp': 'Standard / PTC / Minimal are dynamically derived at runtime from DSH built-in presets and follow upstream updates automatically.',
         'workspace.noHost': 'Add an SSH host first.',
         'files.title': 'Remote files',
         'files.subtitle': 'Browse the SSH directory directly; files are read on demand and are never copied locally.',
@@ -711,7 +711,7 @@ window.__ModuleLoader__.load({
       return String(value ?? '').replace(/([?&](?:token|access_token)=)[^&#]*/gi, '$1••••')
     }
 
-    async function callApi(name, body = {}) {
+    async function callApi(name, body = {}, options = {}) {
       let response
       try {
         response = await fetch('/api/remote-ssh/' + name, {
@@ -719,8 +719,10 @@ window.__ModuleLoader__.load({
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(body),
           credentials: 'same-origin',
+          ...(options?.signal ? { signal: options.signal } : {}),
         })
       } catch (error) {
+        if (error?.name === 'AbortError') throw error
         const failure = new Error(error instanceof Error ? error.message : String(error))
         failure.code = 'api-unreachable'
         throw failure
@@ -2308,9 +2310,13 @@ window.__ModuleLoader__.load({
       const [downloadProgress, setDownloadProgress] = useState(0)
       const [downloaded, setDownloaded] = useState(false)
       const downloadControllerRef = useRef(null)
+      const requestSeqRef = useRef(0)
       const [error, setError] = useState(null)
 
-      useEffect(() => () => downloadControllerRef.current?.abort(), [])
+      useEffect(() => () => {
+        requestSeqRef.current += 1
+        downloadControllerRef.current?.abort()
+      }, [])
       useEffect(() => {
         const url = preview?.imageUrl
         return () => { if (url) URL.revokeObjectURL(url) }
@@ -2318,6 +2324,7 @@ window.__ModuleLoader__.load({
 
       const loadDir = useCallback(async (id, target) => {
         if (!id) return
+        const seq = ++requestSeqRef.current
         setLoading(true)
         setError(null)
         setPreview(null)
@@ -2326,15 +2333,16 @@ window.__ModuleLoader__.load({
         setSearch('')
         try {
           const result = await callApi('filesList', { workspaceId: id, path: target })
+          if (requestSeqRef.current !== seq) return
           setListing(result)
           setPath(result.path)
-          if (!root) setRoot(result.remotePath)
+          setRoot((current) => current || result.remotePath || '')
         } catch (failure) {
-          setError(failure)
+          if (requestSeqRef.current === seq) setError(failure)
         } finally {
-          setLoading(false)
+          if (requestSeqRef.current === seq) setLoading(false)
         }
-      }, [root])
+      }, [])
 
       useEffect(() => {
         let live = true
@@ -2358,6 +2366,7 @@ window.__ModuleLoader__.load({
           await loadDir(workspaceId, entry.path)
           return
         }
+        const seq = ++requestSeqRef.current
         setLoading(true)
         setError(null)
         setEditing(false)
@@ -2366,6 +2375,7 @@ window.__ModuleLoader__.load({
           const imageMime = imageMimeForPath(entry.path)
           if (imageMime) {
             const image = await fetchRemoteFileBlob(workspaceId, entry.path)
+            if (requestSeqRef.current !== seq) return
             const url = URL.createObjectURL(new Blob([image.blob], { type: imageMime }))
             setPreview({
               workspaceId,
@@ -2384,11 +2394,17 @@ window.__ModuleLoader__.load({
             return
           }
           const file = await callApi('filesRead', { workspaceId, path: entry.path, offset: 0, limit: 200 })
-          setPreview({ ...file, offset: 0, nextOffset: 200, lastPageFull: file.lines >= 200 })
+          if (requestSeqRef.current !== seq) return
+          const hasMore = typeof file.hasMore === 'boolean'
+            ? file.hasMore
+            : typeof file.eof === 'boolean'
+              ? !file.eof
+              : file.lines >= 200
+          setPreview({ ...file, offset: 0, nextOffset: file.lines, lastPageFull: hasMore })
         } catch (failure) {
-          setError(failure)
+          if (requestSeqRef.current === seq) setError(failure)
         } finally {
-          setLoading(false)
+          if (requestSeqRef.current === seq) setLoading(false)
         }
       }
 
@@ -2399,13 +2415,18 @@ window.__ModuleLoader__.load({
         try {
           const next = Number.isSafeInteger(preview.nextOffset) ? preview.nextOffset : preview.offset + 200
           const page = await callApi('filesRead', { workspaceId, path: preview.path, offset: next, limit: 200 })
+          const hasMore = typeof page.hasMore === 'boolean'
+            ? page.hasMore
+            : typeof page.eof === 'boolean'
+              ? !page.eof
+              : page.lines >= 200
           setPreview((current) => current ? ({
             ...page,
             offset: current.offset,
-            nextOffset: next + 200,
+            nextOffset: next + page.lines,
             lines: current.lines + page.lines,
             text: current.text + (current.text && !current.text.endsWith('\n') ? '\n' : '') + page.text,
-            lastPageFull: page.lines >= 200,
+            lastPageFull: hasMore,
           }) : page)
         } catch (failure) {
           setError(failure)
@@ -2487,7 +2508,9 @@ window.__ModuleLoader__.load({
             }
             throw new Error(detail || t('files.downloadFailed'))
           }
-          const total = Number(response.headers.get('content-length')) || preview.size
+          const total = Number(response.headers.get('content-length'))
+            || Number(response.headers.get('x-remote-file-size'))
+            || preview.size
           const reader = response.body?.getReader()
           if (!reader) throw new Error(t('files.downloadFailed'))
           const chunks = []
@@ -2519,9 +2542,15 @@ window.__ModuleLoader__.load({
       }
 
       const goUp = () => {
-        if (!listing || listing.path === root) return
-        const parent = listing.path.replace(/\/[^/]+\/?$/, '') || root
-        void loadDir(workspaceId, parent.startsWith(root) ? parent : root)
+        if (!listing || !root) return
+        const normalizedRoot = root.replace(/\/+$/, '') || '/'
+        const currentPath = String(listing.path ?? '').replace(/\/+$/, '') || '/'
+        if (currentPath === normalizedRoot) return
+        const parent = currentPath.replace(/\/[^/]+$/, '') || '/'
+        const withinRoot = normalizedRoot === '/'
+          || parent === normalizedRoot
+          || parent.startsWith(`${normalizedRoot}/`)
+        void loadDir(workspaceId, withinRoot ? parent : normalizedRoot)
       }
 
       const switchWorkspace = (id) => {
@@ -3036,6 +3065,211 @@ window.__ModuleLoader__.load({
         && /[\\/]\.dsh[\\/]remote-ssh[\\/]agent-workspaces[\\/]/i.test(path)
     }
 
+    function workspaceRecordsFromSnapshot(snapshot) {
+      if (!snapshot || typeof snapshot !== 'object') return []
+      if (snapshot.byId && typeof snapshot.byId === 'object') return Object.values(snapshot.byId)
+      if (Array.isArray(snapshot.workspaces)) return snapshot.workspaces
+      if (Array.isArray(snapshot.items)) return snapshot.items
+      return []
+    }
+
+    function isWorkspaceRemoteForSession(ctx, sessionId, currentPreset) {
+      const sessions = typeof ctx?.get === 'function' ? ctx.get('sessions') : ctx?.sessions
+      const workspaces = typeof ctx?.get === 'function' ? ctx.get('workspaces') : ctx?.workspaces
+      const sessionById = sessions?.list?.getSnapshot?.()?.byId ?? null
+      let summary = sessionId && sessionById ? sessionById[sessionId] : null
+      if (!summary && sessionById) {
+        const all = Object.values(sessionById)
+        summary = all.find((item) => item?.blank && (item?.retainedBy?.mainView ?? 0) > 0)
+          ?? all.find((item) => (item?.retainedBy?.mainView ?? 0) > 0)
+          ?? null
+      }
+      if (summary) {
+        if (isRemoteMirrorPath(summary.cwd)) return true
+        const wsList = workspaceRecordsFromSnapshot(workspaces?.list?.getSnapshot?.())
+        const matchedWs = wsList.find((ws) => {
+          if (!ws) return false
+          if (summary.workspaceId && (ws.id === summary.workspaceId || ws.workspaceId === summary.workspaceId)) return true
+          return Array.isArray(ws.sessionIds) && ws.sessionIds.includes(summary.id)
+        })
+        if (matchedWs) {
+          if (isRemoteMirrorPath(matchedWs.path)) return true
+          if (typeof matchedWs.path === 'string' && matchedWs.path !== '') return false
+        }
+        if (typeof summary.cwd === 'string' && summary.cwd !== '') return false
+        const projectedPreset = summary.projectionValues?.agentPreset
+        if (typeof projectedPreset === 'string' && projectedPreset !== '') {
+          return projectedPreset.startsWith('remote-')
+        }
+      }
+      return typeof currentPreset === 'string' && currentPreset.startsWith('remote-')
+    }
+
+    function installPresetSeatFilter(ctx) {
+      const slots = ctx?.slots
+      if (!slots) return () => {}
+      const PRESET_SLOT = 'conversation.hero.agentPreset'
+      const storeCache = new WeakMap()
+      const wrappedEntries = []
+      let registerHook = null
+
+      function filteredStoreFor(rawStore, sessionId) {
+        const key = sessionId ?? '__unbound__'
+        let bySession = storeCache.get(rawStore)
+        if (!bySession) {
+          bySession = new Map()
+          storeCache.set(rawStore, bySession)
+        }
+        let filtered = bySession.get(key)
+        if (filtered) return filtered
+        let cachedRaw = null
+        let cachedRemote = null
+        let cachedResult = null
+        filtered = {
+          getSnapshot() {
+            const raw = rawStore.getSnapshot()
+            if (!raw || !Array.isArray(raw.options)) return raw
+            const isRemote = isWorkspaceRemoteForSession(ctx, sessionId, raw.current)
+            if (raw === cachedRaw && isRemote === cachedRemote && cachedResult !== null) {
+              return cachedResult
+            }
+            const matching = raw.options.filter((option) => {
+              const id = String(option?.id ?? '')
+              return isRemote ? id.startsWith('remote-') : !id.startsWith('remote-')
+            })
+            const options = matching.length > 0 ? matching : raw.options
+            cachedRaw = raw
+            cachedRemote = isRemote
+            cachedResult = options.length === raw.options.length ? raw : { ...raw, options }
+            return cachedResult
+          },
+          subscribe(listener) {
+            const unsubs = []
+            if (typeof rawStore.subscribe === 'function') {
+              unsubs.push(rawStore.subscribe(listener))
+            }
+            const sessions = typeof ctx?.get === 'function' ? ctx.get('sessions') : ctx?.sessions
+            if (typeof sessions?.list?.subscribe === 'function') {
+              unsubs.push(sessions.list.subscribe(listener))
+            }
+            const workspaces = typeof ctx?.get === 'function' ? ctx.get('workspaces') : ctx?.workspaces
+            if (typeof workspaces?.list?.subscribe === 'function') {
+              unsubs.push(workspaces.list.subscribe(listener))
+            }
+            return () => {
+              for (const unsub of unsubs) {
+                try { unsub() } catch { /* ignore */ }
+              }
+            }
+          },
+        }
+        bySession.set(key, filtered)
+        return filtered
+      }
+
+      function wrapSeatInject(originalInject) {
+        if (typeof originalInject !== 'function' || originalInject.__dshRemotePresetFiltered) {
+          return originalInject
+        }
+        const wrapped = function (sessionId, ...args) {
+          const face = originalInject.call(this, sessionId, ...args)
+          const rawStore = face?.hooks?.agentPresetSeat
+          if (!rawStore || typeof rawStore.getSnapshot !== 'function') return face
+          return {
+            ...face,
+            hooks: {
+              ...face.hooks,
+              agentPresetSeat: filteredStoreFor(rawStore, sessionId),
+            },
+          }
+        }
+        wrapped.__dshRemotePresetFiltered = true
+        return wrapped
+      }
+
+      function patchExistingEntries() {
+        try {
+          const entries = slots._core?.entries?.(PRESET_SLOT)
+          if (!Array.isArray(entries)) return
+          let changed = false
+          for (const entry of entries) {
+            if (!entry || typeof entry.inject !== 'function' || entry.inject.__dshRemotePresetFiltered) continue
+            const original = entry.inject
+            const wrapped = wrapSeatInject(original)
+            try {
+              entry.inject = wrapped
+              if (entry.inject === wrapped) {
+                wrappedEntries.push({ entry, original, wrapped })
+                changed = true
+              }
+            } catch {
+              // ignore non-writable entry
+            }
+          }
+          if (changed) {
+            try { ctx.emit?.('slots/changed', PRESET_SLOT) } catch { /* ignore */ }
+          }
+        } catch {
+          // ignore if internal slot core shape differs
+        }
+      }
+
+      try {
+        let target = null
+        let hadOwn = false
+        let original = null
+        if (Object.prototype.hasOwnProperty.call(slots, 'register') && typeof slots.register === 'function') {
+          target = slots
+          hadOwn = true
+          original = slots.register
+        } else {
+          const proto = Object.getPrototypeOf(slots)
+          if (proto && proto !== Object.prototype && typeof proto.register === 'function') {
+            target = proto
+            hadOwn = Object.prototype.hasOwnProperty.call(proto, 'register')
+            original = proto.register
+          }
+        }
+        if (target && typeof original === 'function') {
+          const wrapper = function (options, component, ...rest) {
+            if (options && typeof options === 'object' && options.name === PRESET_SLOT && typeof options.inject === 'function') {
+              return original.call(this, { ...options, inject: wrapSeatInject(options.inject) }, component, ...rest)
+            }
+            return original.call(this, options, component, ...rest)
+          }
+          target.register = wrapper
+          registerHook = { target, hadOwn, original, wrapper }
+        }
+      } catch {
+        // ignore if slots.register is not patchable
+      }
+
+      patchExistingEntries()
+      const unsubSlot = typeof slots.subscribe === 'function'
+        ? slots.subscribe(PRESET_SLOT, patchExistingEntries)
+        : null
+
+      return () => {
+        try { unsubSlot?.() } catch { /* ignore */ }
+        if (registerHook) {
+          const { target, hadOwn, original, wrapper } = registerHook
+          registerHook = null
+          try {
+            if (target.register === wrapper) {
+              if (hadOwn) target.register = original
+              else delete target.register
+            }
+          } catch { /* ignore */ }
+        }
+        while (wrappedEntries.length > 0) {
+          const item = wrappedEntries.pop()
+          try {
+            if (item.entry.inject === item.wrapped) item.entry.inject = item.original
+          } catch { /* ignore */ }
+        }
+      }
+    }
+
     function remotePathForMirror(localPath, workspaces) {
       const normalized = String(localPath ?? '').replace(/\\/g, '/')
       let best = null
@@ -3073,7 +3307,9 @@ window.__ModuleLoader__.load({
       return match ? IMAGE_MIME_TYPES[match[1].toLowerCase()] ?? null : null
     }
 
-    async function fetchRemoteFileBlob(workspaceId, path, signal) {
+    const MAX_PREVIEW_IMAGE_BYTES = 20 * 1024 * 1024
+
+    async function fetchRemoteFileBlob(workspaceId, path, signal, options = {}) {
       const response = await fetch('/api/remote-ssh/filesDownload', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -3091,7 +3327,19 @@ window.__ModuleLoader__.load({
         }
         throw new Error(detail || 'Could not read the remote file.')
       }
-      return { blob: await response.blob(), size: Number(response.headers.get('content-length')) || null }
+      const declaredSize = Number(response.headers.get('content-length'))
+        || Number(response.headers.get('x-remote-file-size'))
+        || null
+      const maxBytes = Number.isSafeInteger(options?.maxBytes) && options.maxBytes > 0 ? options.maxBytes : null
+      if (maxBytes && declaredSize && declaredSize > maxBytes) {
+        try { await response.body?.cancel?.() } catch { /* ignore */ }
+        throw new Error(`Remote image is too large to preview (${formatBytes(declaredSize)}).`)
+      }
+      const blob = await response.blob()
+      if (maxBytes && blob.size > maxBytes) {
+        throw new Error(`Remote image is too large to preview (${formatBytes(blob.size)}).`)
+      }
+      return { blob, size: declaredSize ?? blob.size }
     }
 
     // DSH's native document preview reads through the client-side
@@ -3114,24 +3362,100 @@ window.__ModuleLoader__.load({
       return nativeWorkspaceList.promise
     }
 
-    function nativeFileTarget(value, workspaces) {
+    function normalizePosixPath(value) {
+      const raw = String(value ?? '').replace(/\\/g, '/')
+      const isAbs = raw.startsWith('/')
+      const parts = []
+      for (const seg of raw.split('/')) {
+        if (!seg || seg === '.') continue
+        if (seg === '..') {
+          if (parts.length > 0 && parts[parts.length - 1] !== '..') parts.pop()
+          else if (!isAbs) parts.push('..')
+        } else {
+          parts.push(seg)
+        }
+      }
+      return (isAbs ? '/' : '') + parts.join('/') || (isAbs ? '/' : '.')
+    }
+
+    function sessionWorkspaceForNative(ctx, sessionId, workspaces) {
+      if (!sessionId || !Array.isArray(workspaces) || workspaces.length === 0) return null
+      const sessions = typeof ctx?.get === 'function' ? ctx.get('sessions') : ctx?.sessions
+      const summary = sessions?.list?.getSnapshot?.()?.byId?.[sessionId] ?? null
+      if (!summary) return null
+      if (summary.workspaceId) {
+        const direct = workspaces.find((ws) => ws?.workspaceId === summary.workspaceId)
+        if (direct) return direct
+      }
+      const cwd = String(summary.cwd ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
+      if (cwd) {
+        const lowerCwd = cwd.toLowerCase()
+        for (const ws of workspaces) {
+          const localRoot = String(ws?.path ?? '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+          if (localRoot && (lowerCwd === localRoot || lowerCwd.startsWith(`${localRoot}/`))) return ws
+        }
+      }
+      const wsService = typeof ctx?.get === 'function' ? ctx.get('workspaces') : ctx?.workspaces
+      const wsList = workspaceRecordsFromSnapshot(wsService?.list?.getSnapshot?.())
+      const matched = wsList.find((ws) => Array.isArray(ws?.sessionIds) && ws.sessionIds.includes(sessionId))
+      if (matched) {
+        const byId = workspaces.find((ws) => ws?.workspaceId === (matched.id ?? matched.workspaceId))
+        if (byId) return byId
+      }
+      return null
+    }
+
+    function nativeFileTargetForWorkspace(value, workspace) {
+      const normalized = String(value ?? '').replace(/\\/g, '/')
+      if (normalized === '' || !workspace) return null
+      const localRoot = String(workspace?.path ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
+      const remoteRoot = String(workspace?.remotePath ?? '').replace(/\\/g, '/').replace(/\/+$/, '') || '/'
+      const lower = normalized.toLowerCase()
+      if (localRoot && (lower === localRoot.toLowerCase() || lower.startsWith(`${localRoot.toLowerCase()}/`))) {
+        const relative = normalized.slice(localRoot.length).replace(/^\/+/, '')
+        return {
+          workspaceId: workspace.workspaceId,
+          path: relative === '' ? remoteRoot : normalizePosixPath(`${remoteRoot}/${relative}`),
+          rootLength: localRoot.length,
+        }
+      }
+      if (normalized.startsWith('/')) {
+        const clean = normalizePosixPath(normalized)
+        if (remoteRoot === '/' || clean === remoteRoot || clean.startsWith(`${remoteRoot}/`)) {
+          return { workspaceId: workspace.workspaceId, path: clean, rootLength: remoteRoot.length }
+        }
+        return { workspaceId: workspace.workspaceId, path: clean, rootLength: 1 }
+      }
+      if (/^[A-Za-z]:\//.test(normalized)) return null
+      return {
+        workspaceId: workspace.workspaceId,
+        path: normalizePosixPath(`${remoteRoot}/${normalized}`),
+        rootLength: remoteRoot.length,
+      }
+    }
+
+    function nativeFileTarget(value, workspaces, sessionWorkspace = null) {
+      if (sessionWorkspace) {
+        const scoped = nativeFileTargetForWorkspace(value, sessionWorkspace)
+        if (scoped) return scoped
+      }
       const normalized = String(value ?? '').replace(/\\/g, '/')
       if (normalized === '') return null
       let best = null
       for (const workspace of workspaces) {
         const localRoot = String(workspace?.path ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
         const remoteRoot = String(workspace?.remotePath ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
-        if (localRoot && (normalized === localRoot || normalized.startsWith(`${localRoot}/`))) {
+        if (localRoot && (normalized.toLowerCase() === localRoot.toLowerCase() || normalized.toLowerCase().startsWith(`${localRoot.toLowerCase()}/`))) {
           const relative = normalized.slice(localRoot.length).replace(/^\/+/, '')
           const candidate = {
             workspaceId: workspace.workspaceId,
-            path: relative === '' ? remoteRoot : `${remoteRoot}/${relative}`,
+            path: relative === '' ? remoteRoot : normalizePosixPath(`${remoteRoot}/${relative}`),
             rootLength: localRoot.length,
           }
           if (!best || candidate.rootLength > best.rootLength) best = candidate
         }
         if (remoteRoot && (normalized === remoteRoot || normalized.startsWith(`${remoteRoot}/`))) {
-          const candidate = { workspaceId: workspace.workspaceId, path: normalized, rootLength: remoteRoot.length }
+          const candidate = { workspaceId: workspace.workspaceId, path: normalizePosixPath(normalized), rootLength: remoteRoot.length }
           if (!best || candidate.rootLength > best.rootLength) best = candidate
         }
       }
@@ -3181,25 +3505,48 @@ window.__ModuleLoader__.load({
 
         patchRemoteFilesMethod(files, 'read', (original) => async function (sessionId, path, range, signal) {
           let target = null
-          try { target = nativeFileTarget(path, await loadNativeWorkspaces()) } catch { /* fall back to the Host */ }
+          try {
+            const workspaces = await loadNativeWorkspaces()
+            const sessionWs = sessionWorkspaceForNative(ctx, sessionId, workspaces)
+            target = nativeFileTarget(path, workspaces, sessionWs)
+          } catch { /* fall back to the Host */ }
           if (!target) return original.call(this, sessionId, path, range, signal)
           try {
+            // DSH workspaceFiles.read uses 1-based line offsets (default 1);
+            // filesRead uses 0-based line offsets.
+            const oneBased = Number.isSafeInteger(range?.offset) && range.offset >= 1 ? range.offset : 1
+            const limit = Number.isSafeInteger(range?.limit) && range.limit > 0 ? range.limit : 2000
             const read = await callApi('filesRead', {
               workspaceId: target.workspaceId,
               path: target.path,
-              offset: range?.offset ?? 0,
-              limit: range?.limit ?? 2000,
-            })
+              offset: oneBased - 1,
+              limit,
+            }, { signal })
+            if (read.binary) {
+              return {
+                ok: false,
+                error: {
+                  code: 'workspace-file/not-text',
+                  message: `"${path}" is not UTF-8 text`,
+                  details: { path },
+                },
+              }
+            }
+            const eof = typeof read.eof === 'boolean'
+              ? read.eof
+              : typeof read.hasMore === 'boolean'
+                ? !read.hasMore
+                : !read.truncated
             return {
               ok: true,
               value: {
                 absolutePath: read.path ?? target.path,
                 version: read.version ?? '',
                 bytes: read.size ?? undefined,
-                offset: read.offset ?? 0,
+                offset: oneBased,
                 text: read.text ?? '',
                 lines: read.lines ?? 0,
-                eof: !read.truncated,
+                eof,
               },
             }
           } catch (failure) {
@@ -3211,14 +3558,16 @@ window.__ModuleLoader__.load({
           let target = null
           try {
             const workspaces = await loadNativeWorkspaces()
-            target = nativeFileTarget(path, workspaces)
-            if (!target && options?.baseFile) {
-              const base = nativeFileTarget(options.baseFile, workspaces)
+            const sessionWs = sessionWorkspaceForNative(ctx, sessionId, workspaces)
+            if (options?.baseFile && !String(path ?? '').replace(/\\/g, '/').startsWith('/')) {
+              const base = nativeFileTarget(options.baseFile, workspaces, sessionWs)
               if (base) {
-                const directory = base.path.replace(/\/[^/]*$/, '')
-                target = nativeFileTarget(`${directory}/${String(path ?? '').replace(/^\.?\//, '')}`, workspaces)
+                const directory = base.path.replace(/\/[^/]*$/, '') || '/'
+                const resolved = normalizePosixPath(`${directory}/${String(path ?? '').replace(/\\/g, '/')}`)
+                target = { workspaceId: base.workspaceId, path: resolved, rootLength: base.rootLength }
               }
             }
+            if (!target) target = nativeFileTarget(path, workspaces, sessionWs)
           } catch { /* fall back to the Host */ }
           if (!target) return original.call(this, sessionId, path, options, signal)
           try {
@@ -3246,10 +3595,14 @@ window.__ModuleLoader__.load({
 
         patchRemoteFilesMethod(files, 'stat', (original) => async function (sessionId, path, signal) {
           let target = null
-          try { target = nativeFileTarget(path, await loadNativeWorkspaces()) } catch { /* fall back */ }
+          try {
+            const workspaces = await loadNativeWorkspaces()
+            const sessionWs = sessionWorkspaceForNative(ctx, sessionId, workspaces)
+            target = nativeFileTarget(path, workspaces, sessionWs)
+          } catch { /* fall back */ }
           if (!target) return original.call(this, sessionId, path, signal)
           try {
-            const read = await callApi('filesRead', { workspaceId: target.workspaceId, path: target.path, offset: 0, limit: 1 })
+            const read = await callApi('filesRead', { workspaceId: target.workspaceId, path: target.path, offset: 0, limit: 1 }, { signal })
             return {
               ok: true,
               value: {
@@ -3291,7 +3644,7 @@ window.__ModuleLoader__.load({
             if (!target) throw new Error(t('viewer.notRemote'))
             const imageMime = imageMimeForPath(target.path)
             if (imageMime) {
-              const image = await fetchRemoteFileBlob(target.workspaceId, target.path, controller.signal)
+              const image = await fetchRemoteFileBlob(target.workspaceId, target.path, controller.signal, { maxBytes: MAX_PREVIEW_IMAGE_BYTES })
               if (!alive) return
               objectUrl = URL.createObjectURL(new Blob([image.blob], { type: imageMime }))
               setState({
@@ -3307,14 +3660,14 @@ window.__ModuleLoader__.load({
               })
               return
             }
-            const read = await callApi('filesRead', { workspaceId: target.workspaceId, path: target.path, offset: 0, limit: 1000 })
+            const read = await callApi('filesRead', { workspaceId: target.workspaceId, path: target.path, offset: 0, limit: 1000 }, { signal: controller.signal })
             if (!alive) return
             setState({
               loading: false,
               error: null,
               text: read.text ?? '',
               binary: Boolean(read.binary),
-              truncated: Boolean(read.truncated) || Number(read.lines ?? 0) >= 1000,
+              truncated: Boolean(read.truncated) || read.hasMore === true || read.eof === false,
               target: target.label,
               remotePath: target.path,
               imageUrl: null,
@@ -3975,6 +4328,7 @@ window.__ModuleLoader__.load({
         }, 'remote-ssh: compact directory browser styles')
         ctx.effect(() => installRemoteWorkspaceMenuItem(t), 'remote-ssh: workspace menu item')
         ctx.effect(() => installAddWorkspaceChooser(t), 'remote-ssh: add workspace chooser')
+        ctx.effect(() => installPresetSeatFilter(ctx), 'remote-ssh: workspace preset dropdown filter')
         ctx.effect(() => {
           const descriptor = {
             id: 'dsh-remote-ssh:mirror-file',
@@ -3986,6 +4340,9 @@ window.__ModuleLoader__.load({
             component: (props) => h(RemoteMirrorViewer, { ...props, t }),
           }
           let timer = null
+          let patchedService = null
+          let originalMatcher = null
+          let wrappedMatcher = null
           const install = () => {
             const service = typeof ctx.get === 'function' ? ctx.get('betterSidebar') : null
             if (!service || typeof service.matchFileViewer !== 'function') return false
@@ -3998,6 +4355,9 @@ window.__ModuleLoader__.load({
             wrapped.__dshRemoteSsh = true
             try {
               service.matchFileViewer = wrapped
+              patchedService = service
+              originalMatcher = original
+              wrappedMatcher = wrapped
               return true
             } catch {
               return false
@@ -4013,6 +4373,9 @@ window.__ModuleLoader__.load({
           }
           return () => {
             if (timer) clearInterval(timer)
+            if (patchedService && patchedService.matchFileViewer === wrappedMatcher) {
+              try { patchedService.matchFileViewer = originalMatcher } catch { /* ignore */ }
+            }
           }
         }, 'remote-ssh: remote mirror file viewer')
         ctx.effect(() => {

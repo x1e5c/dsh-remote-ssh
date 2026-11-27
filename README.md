@@ -53,11 +53,11 @@
 
 | 模式 | preset | 说明 |
 | --- | --- | --- |
-| Standard | `remote-standard` | 完整 fs / search / bash / jobs / planning / compaction / delegation |
-| PTC | `remote-ptc` | 以 PTC 展示与 planning 为主 |
-| Minimal | `remote-minimal` | 只保留远程 fs 与 bash |
+| Standard | `remote-standard` | 运行时从 DSH 本体 `standard` 预设动态派生，并将 fs / search / bash / jobs / present 路由到远程 SSH |
+| PTC | `remote-ptc` | 运行时从 DSH 本体 `ptc` 预设动态派生，保留本体的 PTC 执行与规划配置 |
+| Minimal | `remote-minimal` | 运行时从 DSH 本体 `minimal` 预设动态派生，保留精简配置并将 fs / bash 路由到远程 SSH |
 
-默认使用 `remote-standard`。preset 是静态、可复用的；每个 session 根据工作区路径解析实际远程目标。
+默认使用 `remote-standard`。所有 `remote-*` preset 均由 `lib/preset-deriver.js` 在运行时基于 DSH 当前生效的预设自动派生（排除 `cordis` 创建者模式，并支持跟随热重载与自定义预设）；每个 session 根据工作区路径解析实际远程目标。
 
 ### Remote Files
 
@@ -230,9 +230,10 @@ Remote SSH 页面提供 **沙箱日志** 按钮，显示 `sandbox=bwrap|none`、
 dsh-remote-ssh/
 ├─ index.js                  # Host routes / plugin entry
 ├─ client.js                 # Web UI（工作区菜单、Remote SSH 页、Remote Files、对话框、viewer）
-├─ cordis.patch.yml          # bundle patch：Host 插件、presets、terminal group
+├─ cordis.patch.yml          # bundle patch：Host 插件与 terminal group（remote-* preset 由运行时动态派生）
 ├─ lib/
 │  ├─ controller.js          # 主机、工作区、binding、文件路由、沙箱检测、会话导入
+│  ├─ preset-deriver.js      # 从 DSH 本体预设动态派生 remote-* preset 并跟随重载
 │  ├─ remote.js              # SSH 调用与路径校验
 │  ├─ mirror.js              # 文件树 names-only mirror
 │  ├─ remote-sessions.js     # 远程 session 扫描结果解析、标题提取、导入 header
