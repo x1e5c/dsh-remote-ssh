@@ -114,16 +114,18 @@ export function createRemoteFileSystem(config, run = runRemote) {
   }
 
   async function listDir(target, signal) {
-    const info = await stat(target, signal)
-    if (!info) throw fsError(`cannot list "${target.displayPath}": not found`, 'FS_NOT_FOUND')
-    if (info.type !== 'directory') throw fsError(`cannot list "${target.displayPath}": not a directory`, 'FS_NOT_DIRECTORY')
+    const quoted = shellQuote(target.targetKey)
     const result = await exec(
-      `find ${shellQuote(target.targetKey)} -mindepth 1 -maxdepth 1 -printf '%f|%y|%Y|%s|%T@\\n'`,
+      `if [ ! -e ${quoted} ]; then printf '__DSH_FS_NOT_FOUND__\\n'; exit 0; fi; if [ ! -d ${quoted} ]; then printf '__DSH_FS_NOT_DIR__\\n'; exit 0; fi; find -H ${quoted} -mindepth 1 -maxdepth 1 -printf '%f|%y|%Y|%s|%T@\\n'`,
       { signal, timeoutMs: 60000 },
     )
     if (result.code !== 0) throw fsError(`cannot list "${target.displayPath}": ${String(result.stderr ?? '').trim() || `exit ${result.code}`}`, 'FS_IO_ERROR')
+    const raw = String(result.stdout ?? '')
+    const firstLine = raw.split(/\r?\n/, 1)[0]?.trim()
+    if (firstLine === '__DSH_FS_NOT_FOUND__') throw fsError(`cannot list "${target.displayPath}": not found`, 'FS_NOT_FOUND')
+    if (firstLine === '__DSH_FS_NOT_DIR__') throw fsError(`cannot list "${target.displayPath}": not a directory`, 'FS_NOT_DIRECTORY')
     const entries = []
-    for (const line of result.stdout.split(/\r?\n/)) {
+    for (const line of raw.split(/\r?\n/)) {
       if (line === '') continue
       const parts = line.split('|')
       let entryName

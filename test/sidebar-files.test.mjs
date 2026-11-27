@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdir, mkdtemp, readFile, stat as fsStat, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Script, createContext } from 'node:vm'
@@ -25,10 +25,10 @@ function makeControllerWithServices(dir, services = {}, config = {}) {
   class TestController extends RemoteSshController {
     async checkSshAvailable() { return false }
   }
-  return new TestController(ctx, { mirrorNativeTree: false, ...config })
+  return new TestController(ctx, config)
 }
 
-test('remote-fs listDir resolves symlink-to-directory via %Y and lstat preserves symlink type', async () => {
+test('remote-fs listDir runs in 1 SSH call with find -H, resolves symlinks via %Y, and reports not-found/not-dir', async () => {
   const calls = []
   const fs = createRemoteFileSystem({ host: 'dev', remotePath: '/srv/app' }, async (_cfg, script) => {
     calls.push(script)
@@ -38,7 +38,9 @@ test('remote-fs listDir resolves symlink-to-directory via %Y and lstat preserves
       }
       return { code: 0, stdout: 'symbolic link|12|1700000000\n', stderr: '' }
     }
-    if (script.startsWith('find ')) {
+    if (script.includes('find -H ')) {
+      if (script.includes('/srv/app/missing')) return { code: 0, stdout: '__DSH_FS_NOT_FOUND__\n', stderr: '' }
+      if (script.includes('/srv/app/plain.txt')) return { code: 0, stdout: '__DSH_FS_NOT_DIR__\n', stderr: '' }
       return {
         code: 0,
         stdout: [
@@ -59,7 +61,9 @@ test('remote-fs listDir resolves symlink-to-directory via %Y and lstat preserves
   const unfollowed = await fs.lstat({ targetKey: '/srv/app/linked-dir', displayPath: '/srv/app/linked-dir' })
   assert.equal(unfollowed.type, 'symlink')
 
+  calls.length = 0
   const entries = await fs.listDir({ targetKey: '/srv/app', displayPath: '/srv/app' })
+  assert.equal(calls.length, 1, 'listDir must execute in a single SSH call')
   const byName = Object.fromEntries(entries.map((entry) => [entry.name, entry.type]))
   assert.deepEqual(byName, {
     'linked-dir': 'directory',
@@ -67,6 +71,15 @@ test('remote-fs listDir resolves symlink-to-directory via %Y and lstat preserves
     'broken-link': 'symlink',
     'plain.txt': 'file',
   })
+
+  await assert.rejects(
+    () => fs.listDir({ targetKey: '/srv/app/missing', displayPath: '/srv/app/missing' }),
+    (err) => err?.code === 'FS_NOT_FOUND',
+  )
+  await assert.rejects(
+    () => fs.listDir({ targetKey: '/srv/app/plain.txt', displayPath: '/srv/app/plain.txt' }),
+    (err) => err?.code === 'FS_NOT_DIRECTORY',
+  )
 })
 
 test('workspaceFiles.read uses 1-based offset, exact eof, early-quit sed, and RemoteError on binary/missing', async () => {
@@ -314,37 +327,11 @@ test('workspaceFiles.changes coalesces multiple watched paths per host into one 
   await controller.dispose()
 })
 
-test('reconcileMirrorDir updates incrementally without deleting unchanged entries', async () => {
-  const base = await mkdtemp(join(tmpdir(), 'dsh-mirror-reconcile-'))
-  const controller = makeControllerWithServices(base)
-  await controller.ready
-
-  const staging = join(base, 'staging')
-  const target = join(base, 'target')
-  await mkdir(join(target, 'keep-dir'), { recursive: true })
-  await writeFile(join(target, 'keep-dir', 'unchanged.txt'), 'kept')
-  await writeFile(join(target, 'removed.txt'), 'old')
-
-  await mkdir(join(staging, 'keep-dir'), { recursive: true })
-  await writeFile(join(staging, 'keep-dir', 'unchanged.txt'), '')
-  await writeFile(join(staging, 'keep-dir', 'added.txt'), '')
-
-  await controller.reconcileMirrorDir(staging, target)
-
-  // Unchanged file stays intact (not wiped/overwritten when mirrorContent is false).
-  assert.equal(await readFile(join(target, 'keep-dir', 'unchanged.txt'), 'utf8'), 'kept')
-  // Added file appears.
-  assert.ok(await fsStat(join(target, 'keep-dir', 'added.txt')))
-  // Removed file is deleted.
-  await assert.rejects(() => fsStat(join(target, 'removed.txt')))
-
-  await controller.dispose()
-})
-
-test('client.js routes workspaceFiles by sessionId, handles relative paths & 1-based offsets, and restores matchFileViewer', async () => {
+test('client.js routes workspaceFiles (list/read/readBytes) by sessionId with lazy 1-level listing and 1-based offsets', async () => {
   const source = await readFile(new URL('../client.js', import.meta.url), 'utf8')
   let loadedModule = null
   const apiCalls = []
+  const listCalls = []
   const downloadCalls = []
 
   const fetchMock = async (url, init) => {
@@ -360,6 +347,25 @@ test('client.js routes workspaceFiles by sessionId, handles relative paths & 1-b
               { workspaceId: 'ws-host-a', target: 'host-a', remotePath: '/root/data', path: 'C:\\Users\\t\\.dsh\\remote-ssh\\agent-workspaces\\aaaa' },
               { workspaceId: 'ws-host-b', target: 'host-b', remotePath: '/root/data', path: 'C:\\Users\\t\\.dsh\\remote-ssh\\agent-workspaces\\bbbb' },
             ],
+          }
+        },
+      }
+    }
+    if (url === '/api/remote-ssh/filesList') {
+      listCalls.push(body)
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            ok: true,
+            workspaceId: body.workspaceId,
+            remotePath: '/root/data',
+            path: body.path,
+            entries: body.path === '/root/data'
+              ? [{ name: 'src', path: '/root/data/src', type: 'directory', size: 4096 }, { name: 'README.md', path: '/root/data/README.md', type: 'file', size: 120 }]
+              : [{ name: 'index.js', path: '/root/data/src/index.js', type: 'file', size: 42 }],
+            truncated: false,
           }
         },
       }
@@ -439,6 +445,7 @@ test('client.js routes workspaceFiles by sessionId, handles relative paths & 1-b
   })
 
   const workspaceFilesRemote = {
+    async list() { return { ok: false, error: { code: 'local-fallback' } } },
     async read() { return { ok: false, error: { code: 'local-fallback' } } },
     async readBytes() { return { ok: false, error: { code: 'local-fallback' } } },
     async stat() { return { ok: false, error: { code: 'local-fallback' } } },
@@ -481,6 +488,21 @@ test('client.js routes workspaceFiles by sessionId, handles relative paths & 1-b
   }
 
   plugin.apply(clientCtx)
+
+  // Lazy 1-level listing: root ("") lists only top level; expanding "src" lists only "src".
+  const rootList = await workspaceFilesRemote.list('sess-b', '')
+  assert.equal(rootList.ok, true)
+  assert.equal(rootList.value.path, '')
+  assert.deepEqual(rootList.value.entries.map((e) => `${e.name}:${e.type}`), ['src:directory', 'README.md:file'])
+  assert.equal(listCalls[0].workspaceId, 'ws-host-b')
+  assert.equal(listCalls[0].path, '/root/data')
+
+  const subList = await workspaceFilesRemote.list('sess-b', 'src')
+  assert.equal(subList.ok, true)
+  assert.equal(subList.value.path, 'src')
+  assert.deepEqual(subList.value.entries.map((e) => e.name), ['index.js'])
+  assert.equal(listCalls[1].workspaceId, 'ws-host-b')
+  assert.equal(listCalls[1].path, '/root/data/src')
 
   // Session B opens /root/data/app.js (shared remotePath with host-a!) with 1-based offset=1.
   const readRes = await workspaceFilesRemote.read('sess-b', '/root/data/app.js', { offset: 1, limit: 100 })

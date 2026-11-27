@@ -29,8 +29,11 @@ function fakeRunner() {
       files.set(path, { type: 'file', content: Buffer.from(options.stdin ?? '', 'base64').toString('utf8'), mtime: 200 })
       return { code: 0, stdout: '', stderr: '' }
     }
-    if (script.startsWith('find ')) {
+    if (script.includes('find -H ')) {
       const root = [...script.matchAll(/'([^']*)'/g)][0]?.[1]
+      const targetEntry = files.get(root)
+      if (!targetEntry) return { code: 0, stdout: '__DSH_FS_NOT_FOUND__\n', stderr: '' }
+      if (targetEntry.type !== 'directory') return { code: 0, stdout: '__DSH_FS_NOT_DIR__\n', stderr: '' }
       const rows = []
       for (const [path, entry] of files) {
         if (path === root || !path.startsWith(`${root}/`)) continue

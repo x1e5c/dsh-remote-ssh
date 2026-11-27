@@ -11,7 +11,7 @@ function createHarness() {
   controller.ready = Promise.resolve()
   controller.hosts = [host]
   controller.agentWorkspaces = new Map()
-  controller.config = { mirrorNativeTree: false }
+  controller.config = {}
   controller.ctx = {
     get(name) {
       if (name === 'workspaceRegistry') return registry

@@ -3593,6 +3593,61 @@ window.__ModuleLoader__.load({
           }
         })
 
+        patchRemoteFilesMethod(files, 'list', (original) => async function (sessionId, path, signal) {
+          let target = null
+          let workspaceRootRemote = null
+          try {
+            const workspaces = await loadNativeWorkspaces()
+            const sessionWs = sessionWorkspaceForNative(ctx, sessionId, workspaces)
+            const requested = String(path ?? '').trim()
+            if ((requested === '' || requested === '.') && sessionWs) {
+              target = { workspaceId: sessionWs.workspaceId, path: sessionWs.remotePath }
+              workspaceRootRemote = sessionWs.remotePath
+            } else {
+              target = nativeFileTarget(requested, workspaces, sessionWs)
+              if (target) {
+                const matchedWs = workspaces.find((ws) => ws?.workspaceId === target.workspaceId)
+                workspaceRootRemote = matchedWs?.remotePath ?? sessionWs?.remotePath ?? null
+              }
+            }
+          } catch { /* fall back */ }
+          if (!target) return original.call(this, sessionId, path, signal)
+          try {
+            const listed = await callApi('filesList', { workspaceId: target.workspaceId, path: target.path }, { signal })
+            const rootBase = normalizePosixPath(listed.remotePath ?? workspaceRootRemote ?? '/').replace(/\/+$/, '') || '/'
+            const listedAbs = normalizePosixPath(listed.path ?? target.path).replace(/\/+$/, '') || '/'
+            let relativePath = ''
+            if (listedAbs !== rootBase) {
+              if (rootBase === '/') relativePath = listedAbs.replace(/^\/+/, '')
+              else if (listedAbs.startsWith(`${rootBase}/`)) relativePath = listedAbs.slice(rootBase.length + 1)
+              else relativePath = listedAbs
+            }
+            const entries = Array.isArray(listed.entries)
+              ? listed.entries.map((entry) => ({
+                name: entry.name,
+                type: entry.type === 'directory' ? 'directory' : entry.type === 'file' ? 'file' : 'other',
+                ...(Number.isFinite(entry.size) ? { size: entry.size } : {}),
+              }))
+              : []
+            return {
+              ok: true,
+              value: {
+                path: relativePath,
+                entries,
+                truncated: Boolean(listed.truncated),
+              },
+            }
+          } catch (failure) {
+            const message = failure instanceof Error ? failure.message : String(failure ?? 'Remote directory listing failed')
+            const code = failure?.code === 'FS_NOT_DIRECTORY' || /not a directory/i.test(message)
+              ? 'workspace-file/not-directory'
+              : failure?.code === 'FS_NOT_FOUND' || /not found|ENOENT/i.test(message)
+                ? 'workspace-file/not-found'
+                : 'gateway/internal'
+            return { ok: false, error: { code, message, details: { path: String(path ?? '') } } }
+          }
+        })
+
         patchRemoteFilesMethod(files, 'stat', (original) => async function (sessionId, path, signal) {
           let target = null
           try {
