@@ -51,7 +51,6 @@ test('resolves the session cwd to its remote workspace binding', async () => {
   assert.equal(binding.remotePath, '/home/shichang/working/tttest')
   assert.equal(binding.mode, 'ptc')
   assert.equal(binding.preset, 'remote-ptc')
-  assert.match(binding.terminalType, /^remote-ssh-iota-sc-/)
 
   const child = controller.resolveRemoteWorkspace({
     header: { cwd: 'C:/Users/xiesc/.dsh/remote-ssh/agent-workspaces/abc123/subdir' },

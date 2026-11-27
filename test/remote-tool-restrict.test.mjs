@@ -33,28 +33,10 @@ test('remote presets hide global ops tools and deny scope-local local tools', as
   assert.equal(discovered.kind, 'deny')
   assert.deepEqual(await listener({ name: 'bash' }, next), { kind: 'allow' })
   assert.deepEqual(await listener({ name: 'read' }, next), { kind: 'allow' })
-  assert.deepEqual(
-    await listener({ name: 'terminal_open', arguments: { type: 'remote-ssh' } }, next),
-    { kind: 'allow' },
-  )
-  const localTerminal = await listener({ name: 'terminal_open', arguments: { type: 'bash' } }, next)
-  assert.equal(localTerminal.kind, 'deny')
-})
 
-test('a preset can require one exact terminal backend type', async () => {
-  let listener = null
-  apply({
-    tools: { restrict() {} },
-    effect(fn) { fn() },
-    get() { return undefined },
-    on(_name, fn) { listener = fn; return () => {} },
-  }, { terminalType: 'remote-ssh-aliyun-root-data-2fd799' })
-  const next = async () => ({ kind: 'allow' })
-  assert.deepEqual(
-    await listener({ name: 'terminal_open', arguments: { type: 'remote-ssh-aliyun-root-data-2fd799' } }, next),
-    { kind: 'allow' },
-  )
-  const other = await listener({ name: 'terminal_open', arguments: { type: 'remote-ssh' } }, next)
-  assert.equal(other.kind, 'deny')
-  assert.match(other.reason, /remote-ssh-aliyun-root-data-2fd799/)
+  // The plugin ships no remote terminal backend, so opening a terminal in a
+  // remote workspace would run on the local machine — always denied.
+  const terminal = await listener({ name: 'terminal_open', arguments: { type: 'remote-ssh' } }, next)
+  assert.equal(terminal.kind, 'deny')
+  assert.match(terminal.reason, /disabled in this remote workspace/)
 })

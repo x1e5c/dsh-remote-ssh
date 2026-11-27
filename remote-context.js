@@ -10,8 +10,7 @@ export function apply(ctx) {
       if (!binding) return ''
       return [
         `Remote SSH workspace: ${binding.host}:${binding.remotePath}.`,
-        'Filesystem, bash, jobs, and terminal tools operate on this remote host; never use local paths.',
-        `For terminal_open use backend type "${binding.terminalType}".`,
+        'Filesystem, bash, and jobs tools operate on this remote host; never use local paths.',
       ].join(' ')
     },
   }), 'remote-context: workspace binding')

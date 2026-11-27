@@ -1,5 +1,3 @@
-import { currentRemoteWorkspace } from './lib/binding-service.js'
-
 export const name = 'remote-tool-restrict'
 export const inject = ['tools']
 
@@ -23,31 +21,15 @@ const GUARDED_HOST_TOOLS = [
   'load_workspace_dependencies',
   'render_ui',
   'validate_dsh_ui',
+  // The plugin no longer ships a remote terminal backend, so a terminal in a
+  // remote workspace would open a LOCAL shell and run the command on the wrong
+  // machine. Keep the tool denied here.
+  'terminal_open',
 ]
 
-export function apply(ctx, config) {
-  const expectedTerminalType = typeof config?.terminalType === 'string' && config.terminalType !== ''
-    ? config.terminalType
-    : null
+export function apply(ctx) {
   ctx.tools.restrict({ deny: GLOBAL_HOST_TOOLS })
   ctx.effect(() => ctx.on('tools/pre-execute', async (exec, next) => {
-    if (exec.name === 'terminal_open') {
-      const type = exec.arguments?.type
-      const binding = currentRemoteWorkspace(ctx)
-      const required = binding?.terminalType ?? expectedTerminalType
-      if (required) {
-        if (type === required) return next()
-        return {
-          kind: 'deny',
-          reason: `Use terminal backend "${required}" for this remote workspace.`,
-        }
-      }
-      if (typeof type === 'string' && type.startsWith('remote-ssh')) return next()
-      return {
-        kind: 'deny',
-        reason: 'Only a remote-ssh terminal backend is allowed in this remote workspace.',
-      }
-    }
     if (!GUARDED_HOST_TOOLS.includes(exec.name)) return next()
     return {
       kind: 'deny',

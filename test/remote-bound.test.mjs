@@ -17,7 +17,6 @@ test('remote fs resolves paths from the session-bound workspace', () => {
   const fs = createBoundRemoteFileSystem(ctxWithBinding({
     host: 'iota-sc',
     remotePath: '/home/shichang/working/tttest',
-    terminalType: 'remote-ssh-iota-sc-home-shichang-working-tttest-8368ba',
   }))
   assert.equal(fs.processPath({ targetKey: '/home/shichang/working/tttest/a.txt', displayPath: 'a.txt' }), '/home/shichang/working/tttest/a.txt')
   assert.throws(

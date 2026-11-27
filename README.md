@@ -1,21 +1,20 @@
 # DSH Remote SSH
 
-在 [DeepSeek Harness](https://github.com/deepseek-ai) 里使用远程 SSH 工作区：**agent、模型、会话、审批留在本地，文件系统、命令、任务和终端在远程机器执行**。远程机器不需要安装或运行 dsh。
+在 [DeepSeek Harness](https://github.com/deepseek-ai) 里使用远程 SSH 工作区：**agent、模型、会话、审批留在本地，文件系统、命令和任务在远程机器执行**。远程机器不需要安装或运行 dsh。
 
-这是一个面向真实远程开发场景的 DSH 插件：你在熟悉的 Chat / 工作区 UI 里工作，实际读写、搜索、bash、jobs 和终端都落在 SSH 主机上。
+这是一个面向真实远程开发场景的 DSH 插件：你在熟悉的 Chat / 工作区 UI 里工作，实际读写、搜索、bash、jobs 都落在 SSH 主机上。
 
 ```text
 本地 DSH Host
   ├─ agent / model / session / approvals
   ├─ remote workspace binding
-  └─ remote fs / shell / jobs / terminal providers
+  └─ remote fs / shell / jobs providers
           │
           │ SSH
           ▼
 远程主机
   ├─ 工作目录
-  ├─ bash / jobs
-  └─ terminal
+  └─ bash / jobs
 ```
 
 ## 为什么
@@ -24,8 +23,8 @@
 
 - **不启动远程 dsh**：没有远程 profile、代理或嵌入 UI；远程 dsh 的历史会话可以手动导入本地，导入后仍由本地 agent 驱动；
 - **只把工具执行搬到远程**：agent 仍然在本地，模型、上下文、审批、会话历史都在本地；
-- **工作区就是远程目录**：新建远程工作区后，当前会话的 fs / shell / terminal 自动绑定到该主机和目录；
-- **保留 DSH 的交互方式**：会话、工作区切换、文件树、终端都还在同一个 UI 里。
+- **工作区就是远程目录**：新建远程工作区后，当前会话的 fs / shell 自动绑定到该主机和目录；
+- **保留 DSH 的交互方式**：会话、工作区切换、文件树都还在同一个 UI 里。
 
 ## 功能
 
@@ -44,10 +43,9 @@
 
 - `read`、`write`、`edit`、`glob`、`grep`；
 - `bash`、后台 jobs；
-- fs 搜索与大文件分页；
-- 远程终端。
+- fs 搜索与大文件分页。
 
-本地 `working_directory`、`render_ui`、`validate_dsh_ui` 等全局工具在远程 preset 中被限制；`ops_*` 是 scope-local 工具，不能用 `tools.restrict()` 隐藏，由 pre-execute 拒绝，避免误用本地路径。
+本地 `working_directory`、`render_ui`、`validate_dsh_ui` 等全局工具在远程 preset 中被限制；`ops_*` 是 scope-local 工具，不能用 `tools.restrict()` 隐藏，由 pre-execute 拒绝，避免误用本地路径。本插件不提供远程终端 backend，因此远程工作区里的 `terminal_open` 也会被拒绝（避免在本机开一个终端）。
 
 ### 三种远程模式
 
@@ -97,24 +95,15 @@
 - 只读取远程 session log 的快照，不启动远程 dsh，也不会修改远程会话；
 - 只支持 DSH 当前的 v4 log；更早的 v3 log 需要先在远程用兼容版本迁移，不能直接导入；
 - 远程 `cwd` 会映射为本地 remote-agent workspace；如果该远程目录还没有工作区，会自动创建；
-- 导入后的 session header 指向本地 remote-agent workspace，preset 为 `remote-standard` / `remote-ptc` / `remote-minimal`（取决于该远程目录已有工作区的模式），因此继续对话时仍然使用远程 fs / shell / terminal；
+- 导入后的 session header 指向本地 remote-agent workspace，preset 为 `remote-standard` / `remote-ptc` / `remote-minimal`（取决于该远程目录已有工作区的模式），因此继续对话时仍然使用远程 fs / shell；
 - 远程日志里的 `agent-preset/selected` 事件会被改写，避免回放时切回远程机器上的本地 preset；
 - 远程日志里的 `approval/policy`、`sandbox/mode`、`permission/preset` 事件会保留在原序号位置，但 payload 改成本地限制性默认值（`ask` / `workspace-write` / `workspace-write`），避免远程策略在本地回放时放宽本地审批/沙箱设置，同时不破坏 v4 事件的 `throughSeq`、`shadowedSeqs` 等序号关系；
 - 已导入的 session id 会标记为 **已导入**，不会重复写入；
 - 导入是手动快照：导入后远程会话的新消息不会自动同步；再次导入同一 id 时只会跳过。
 
-### 终端
-
-远程终端通过 `remote-terminal-multi` 动态注册：
-
-- 每个 agent workspace 一个 backend；
-- 类型形如 `remote-ssh-<target>-<path>-<digest>`；
-- 5 秒轮询 `agent-workspaces.json` 以跟随新工作区；
-- 终端在远程执行，但会话与审批仍在本地。
-
 ### bwrap 沙箱
 
-如果远程主机支持 unprivileged `bwrap`，插件会在主机检测和添加时识别，并让远程 bash / terminal 在沙箱里执行：
+如果远程主机支持 unprivileged `bwrap`，插件会在主机检测和添加时识别，并让远程 bash 在沙箱里执行：
 
 ```sh
 bwrap --ro-bind / / \
@@ -177,8 +166,7 @@ Remote SSH 页面提供 **沙箱日志** 按钮，显示 `sandbox=bwrap|none`、
    ```
 
 3. 点 **Install**；
-4. 如果 profile 还没有终端 bundle，先安装 `@deepseek-ai/dsh-experimental-terminal-bundle`；
-5. 完整重启 DSH。
+4. 完整重启 DSH。
 
 安装器会读取仓库中的 `package.json` 和 `dsh.bundle.patch`，把 `dsh-remote-ssh` 作为 bundle 加入 profile。
 
@@ -190,12 +178,9 @@ Remote SSH 页面提供 **沙箱日志** 按钮，显示 `sandbox=bwrap|none`、
 [
   "@deepseek-ai/dsh-base",
   "@deepseek-ai/dsh-web-app",
-  "@deepseek-ai/dsh-experimental-terminal-bundle",
   "dsh-remote-ssh"
 ]
 ```
-
-顺序很重要：**`@deepseek-ai/dsh-experimental-terminal-bundle` 必须在 `dsh-remote-ssh` 之前**，因为 remote bundle 会覆盖它的 `optional-persistent-terminals` group。
 
 然后完整重启 DSH。
 
@@ -209,7 +194,7 @@ Remote SSH 页面提供 **沙箱日志** 按钮，显示 `sandbox=bwrap|none`、
 4. 点 **Add Workspace**（加号）→ **添加远程工作区**；
 5. 选择主机与远程目录；
 6. 创建并打开远程工作区；
-7. 在文件树、终端或对话中使用远程工具；
+7. 在文件树或对话中使用远程工具；
 8. 如果要继续远程机器上已有的 dsh 会话，回 **Remote SSH** 页点主机的 **导入会话**。
 
 ## 项目结构
@@ -218,7 +203,7 @@ Remote SSH 页面提供 **沙箱日志** 按钮，显示 `sandbox=bwrap|none`、
 dsh-remote-ssh/
 ├─ index.js                  # Host routes / plugin entry
 ├─ client.js                 # Web UI（工作区菜单、Remote SSH 页、对话框、viewer）
-├─ cordis.patch.yml          # bundle patch：Host 插件与 terminal group（remote-* preset 由运行时动态派生）
+├─ cordis.patch.yml          # bundle patch：Host 插件（remote-* preset 由运行时动态派生）
 ├─ lib/
 │  ├─ controller.js          # 主机、工作区、binding、文件路由、沙箱检测、会话导入
 │  ├─ preset-deriver.js      # 从 DSH 本体预设动态派生 remote-* preset 并跟随重载
@@ -228,7 +213,6 @@ dsh-remote-ssh/
 │  └─ ...
 ├─ remote-fs.js              # 远程 fs provider
 ├─ remote-shell.js           # 远程 shell provider + bwrap + 日志
-├─ remote-terminal*.js       # 远程终端 backend
 ├─ remote-tool-restrict.js   # 本地工具限制
 ├─ remote-fs-approval.js     # 远程执行审批
 ├─ remote-context.js         # system prompt 上下文
