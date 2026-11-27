@@ -1009,10 +1009,17 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         let alive = true
         let first = true
+        let inFlight = false
         const load = async () => {
-          if (!alive) return
-          await refresh(!first)
-          first = false
+          if (!alive || inFlight) return
+          if (!first && typeof document !== 'undefined' && document.hidden) return
+          inFlight = true
+          try {
+            await refresh(!first)
+            first = false
+          } finally {
+            inFlight = false
+          }
         }
         load()
         const timer = setInterval(load, 2000)
@@ -1617,16 +1624,22 @@ window.__ModuleLoader__.load({
       const [mirrorIds, setMirrorIds] = useState([])
       useEffect(() => {
         let alive = true
-        const load = async () => {
+        let inFlight = false
+        const load = async (initial = false) => {
+          if (!alive || inFlight) return
+          if (!initial && typeof document !== 'undefined' && document.hidden) return
+          inFlight = true
           try {
             const data = await callApi('list')
             if (alive) setMirrorIds(Array.isArray(data.mirrorSessionIds) ? data.mirrorSessionIds : [])
           } catch {
             // keep the last known mirror set
+          } finally {
+            inFlight = false
           }
         }
-        load()
-        const timer = setInterval(load, 5000)
+        load(true)
+        const timer = setInterval(() => load(false), 5000)
         return () => {
           alive = false
           clearInterval(timer)
@@ -1694,16 +1707,22 @@ window.__ModuleLoader__.load({
       const [mirrorIds, setMirrorIds] = useState([])
       useEffect(() => {
         let alive = true
-        const load = async () => {
+        let inFlight = false
+        const load = async (initial = false) => {
+          if (!alive || inFlight) return
+          if (!initial && typeof document !== 'undefined' && document.hidden) return
+          inFlight = true
           try {
             const data = await callApi('list')
             if (alive) setMirrorIds(Array.isArray(data.mirrorSessionIds) ? data.mirrorSessionIds : [])
           } catch {
             // leave the action hidden when the Host is unavailable
+          } finally {
+            inFlight = false
           }
         }
-        load()
-        const timer = setInterval(load, 10000)
+        load(true)
+        const timer = setInterval(() => load(false), 10000)
         return () => {
           alive = false
           clearInterval(timer)
@@ -2999,65 +3018,91 @@ window.__ModuleLoader__.load({
     function installRemoteWorkspaceMenuItem(t) {
       if (typeof document === 'undefined' || !document.body) return () => {}
       const addPattern = /^(添加工作区|Add workspace)\s*[.…]+$/
-      let scheduled = false
-      const scan = () => {
-        scheduled = false
-        const candidates = document.querySelectorAll('button, [role="menuitem"]')
-        for (const add of candidates) {
-          const text = (add.textContent ?? '').trim()
-          if (!addPattern.test(text)) continue
-          const parent = add.parentElement
-          if (!parent || parent.querySelector('[data-dsh-remote-workspace-menu]')) continue
-          const row = add.cloneNode(true)
-          row.removeAttribute('id')
-          row.removeAttribute('aria-keyshortcuts')
-          row.setAttribute('data-dsh-remote-workspace-menu', 'true')
-          row.setAttribute('aria-label', t('flow.remoteMenu'))
-          if (row.tagName !== 'BUTTON') {
-            row.setAttribute('role', 'menuitem')
-            row.setAttribute('tabindex', '0')
-          } else {
-            row.type = 'button'
+      const pendingRoots = new Set()
+      let timer = null
+      const processCandidate = (add) => {
+        const text = (add.textContent ?? '').trim()
+        if (!addPattern.test(text)) return
+        const parent = add.parentElement
+        if (!parent || parent.querySelector('[data-dsh-remote-workspace-menu]')) return
+        const row = add.cloneNode(true)
+        row.removeAttribute('id')
+        row.removeAttribute('aria-keyshortcuts')
+        row.setAttribute('data-dsh-remote-workspace-menu', 'true')
+        row.setAttribute('aria-label', t('flow.remoteMenu'))
+        if (row.tagName !== 'BUTTON') {
+          row.setAttribute('role', 'menuitem')
+          row.setAttribute('tabindex', '0')
+        } else {
+          row.type = 'button'
+        }
+        const textNodes = []
+        const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT, {
+          acceptNode(node) {
+            return node.parentElement?.closest('svg') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+          },
+        })
+        while (walker.nextNode()) {
+          if (walker.currentNode.nodeValue.trim() !== '') textNodes.push(walker.currentNode)
+        }
+        if (textNodes.length > 0) {
+          textNodes[0].nodeValue = t('flow.remoteMenu')
+          for (let index = 1; index < textNodes.length; index += 1) textNodes[index].nodeValue = ''
+        } else {
+          row.textContent = t('flow.remoteMenu')
+        }
+        row.addEventListener('click', (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          window.dispatchEvent(new CustomEvent('dsh-remote-workspace-open'))
+          window.setTimeout(() => {
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+          }, 0)
+        })
+        row.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return
+          event.preventDefault()
+          row.click()
+        })
+        parent.insertBefore(row, add.nextSibling)
+      }
+      const scanRoot = (root) => {
+        if (!root || !root.isConnected) return
+        if (typeof root.matches === 'function' && root.matches('button, [role="menuitem"]')) {
+          processCandidate(root)
+        }
+        if (typeof root.querySelectorAll === 'function') {
+          for (const add of root.querySelectorAll('button, [role="menuitem"]')) {
+            processCandidate(add)
           }
-          const textNodes = []
-          const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT, {
-            acceptNode(node) {
-              return node.parentElement?.closest('svg') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
-            },
-          })
-          while (walker.nextNode()) {
-            if (walker.currentNode.nodeValue.trim() !== '') textNodes.push(walker.currentNode)
-          }
-          if (textNodes.length > 0) {
-            textNodes[0].nodeValue = t('flow.remoteMenu')
-            for (let index = 1; index < textNodes.length; index += 1) textNodes[index].nodeValue = ''
-          } else {
-            row.textContent = t('flow.remoteMenu')
-          }
-          row.addEventListener('click', (event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            window.dispatchEvent(new CustomEvent('dsh-remote-workspace-open'))
-            window.setTimeout(() => {
-              document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-            }, 0)
-          })
-          row.addEventListener('keydown', (event) => {
-            if (event.key !== 'Enter' && event.key !== ' ') return
-            event.preventDefault()
-            row.click()
-          })
-          parent.insertBefore(row, add.nextSibling)
         }
       }
-      const observer = new MutationObserver(() => {
-        if (scheduled) return
-        scheduled = true
-        queueMicrotask(scan)
+      const flush = () => {
+        timer = null
+        const roots = [...pendingRoots]
+        pendingRoots.clear()
+        for (const root of roots) scanRoot(root)
+      }
+      const observer = new MutationObserver((mutations) => {
+        let added = false
+        for (const mutation of mutations) {
+          for (const node of mutation.addedNodes) {
+            if (node && node.nodeType === 1) {
+              pendingRoots.add(node)
+              added = true
+            }
+          }
+        }
+        if (!added || timer !== null) return
+        timer = setTimeout(flush, 50)
       })
       observer.observe(document.body, { childList: true, subtree: true })
-      scan()
-      return () => observer.disconnect()
+      scanRoot(document.body)
+      return () => {
+        observer.disconnect()
+        if (timer !== null) clearTimeout(timer)
+        pendingRoots.clear()
+      }
     }
 
     function isRemoteMirrorPath(path) {
@@ -3310,18 +3355,21 @@ window.__ModuleLoader__.load({
     const MAX_PREVIEW_IMAGE_BYTES = 20 * 1024 * 1024
 
     async function fetchRemoteFileBlob(workspaceId, path, signal, options = {}) {
+      const payload = { workspaceId, path }
+      if (Number.isSafeInteger(options?.offset) && options.offset >= 0) payload.offset = options.offset
+      if (Number.isSafeInteger(options?.length) && options.length > 0) payload.length = options.length
       const response = await fetch('/api/remote-ssh/filesDownload', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ workspaceId, path }),
+        body: JSON.stringify(payload),
         credentials: 'same-origin',
         signal,
       })
       if (!response.ok) {
         let detail = null
         try {
-          const payload = await response.json()
-          detail = payload?.error?.message ?? null
+          const body = await response.json()
+          detail = body?.error?.message ?? null
         } catch {
           // ignore
         }
@@ -3330,8 +3378,9 @@ window.__ModuleLoader__.load({
       const declaredSize = Number(response.headers.get('content-length'))
         || Number(response.headers.get('x-remote-file-size'))
         || null
+      const version = response.headers.get('x-remote-file-version') || ''
       const maxBytes = Number.isSafeInteger(options?.maxBytes) && options.maxBytes > 0 ? options.maxBytes : null
-      if (maxBytes && declaredSize && declaredSize > maxBytes) {
+      if (maxBytes && declaredSize && declaredSize > maxBytes && payload.offset === undefined && payload.length === undefined) {
         try { await response.body?.cancel?.() } catch { /* ignore */ }
         throw new Error(`Remote image is too large to preview (${formatBytes(declaredSize)}).`)
       }
@@ -3339,7 +3388,7 @@ window.__ModuleLoader__.load({
       if (maxBytes && blob.size > maxBytes) {
         throw new Error(`Remote image is too large to preview (${formatBytes(blob.size)}).`)
       }
-      return { blob, size: declaredSize ?? blob.size }
+      return { blob, size: declaredSize ?? blob.size, version }
     }
 
     // DSH's native document preview reads through the client-side
@@ -3571,21 +3620,26 @@ window.__ModuleLoader__.load({
           } catch { /* fall back to the Host */ }
           if (!target) return original.call(this, sessionId, path, options, signal)
           try {
-            const image = await fetchRemoteFileBlob(target.workspaceId, target.path, signal)
-            const data = new Uint8Array(await image.blob.arrayBuffer())
             const range = options?.range
             const offset = Number.isSafeInteger(range?.offset) && range.offset >= 0 ? range.offset : 0
             const length = Number.isSafeInteger(range?.length) && range.length > 0 ? range.length : undefined
-            const slice = length === undefined ? data.subarray(offset) : data.subarray(offset, offset + length)
+            const image = await fetchRemoteFileBlob(
+              target.workspaceId,
+              target.path,
+              signal,
+              range ? { offset, length } : {},
+            )
+            const data = new Uint8Array(await image.blob.arrayBuffer())
+            const totalBytes = Number.isFinite(image.size) && image.size >= 0 ? image.size : offset + data.length
             return {
               ok: true,
               value: {
                 absolutePath: target.path,
-                version: '',
-                bytes: data.length,
+                version: image.version ?? '',
+                bytes: totalBytes,
                 offset,
-                data: slice,
-                eof: offset + slice.length >= data.length,
+                data,
+                eof: offset + data.length >= totalBytes,
               },
             }
           } catch (failure) {
@@ -3657,13 +3711,13 @@ window.__ModuleLoader__.load({
           } catch { /* fall back */ }
           if (!target) return original.call(this, sessionId, path, signal)
           try {
-            const read = await callApi('filesRead', { workspaceId: target.workspaceId, path: target.path, offset: 0, limit: 1 }, { signal })
+            const info = await callApi('filesStat', { workspaceId: target.workspaceId, path: target.path }, { signal })
             return {
               ok: true,
               value: {
-                absolutePath: read.path ?? target.path,
-                version: read.version ?? '',
-                bytes: read.size ?? undefined,
+                absolutePath: info.path ?? target.path,
+                version: info.version ?? '',
+                bytes: info.size ?? undefined,
               },
             }
           } catch (failure) {
@@ -3677,8 +3731,10 @@ window.__ModuleLoader__.load({
       if (typeof ctx.inject === 'function') {
         ctx.inject(['remote.workspaceFiles'], (scope) => { install(scope) })
       }
+      let attempts = 0
       const timer = setInterval(() => {
-        if (install()) clearInterval(timer)
+        attempts += 1
+        if (install() || attempts >= 30) clearInterval(timer)
       }, 500)
       return () => clearInterval(timer)
     }
@@ -3855,23 +3911,54 @@ window.__ModuleLoader__.load({
         event.stopImmediatePropagation()
         show(event.currentTarget)
       }
-      const scan = () => {
-        for (const element of document.querySelectorAll('button, [role="button"]')) {
-          if (element.getAttribute('data-dsh-add-chooser') === 'true') continue
-          const label = (element.getAttribute('aria-label') ?? '').trim()
-          const shortcut = (element.getAttribute('aria-keyshortcuts') ?? '').toLowerCase()
-          const text = (element.textContent ?? '').trim()
-          if (!/^(添加工作区|Add workspace)$/i.test(label) && !shortcut.includes('control+o') && !shortcut.includes('meta+o')) continue
-          if (/^(添加工作区|Add workspace)\s*[.…]+$/.test(text)) continue
-          element.setAttribute('data-dsh-add-chooser', 'true')
-          element.addEventListener('click', onAddClick, true)
+      const pendingRoots = new Set()
+      let scanTimer = null
+      const processButton = (element) => {
+        if (element.getAttribute('data-dsh-add-chooser') === 'true') return
+        const label = (element.getAttribute('aria-label') ?? '').trim()
+        const shortcut = (element.getAttribute('aria-keyshortcuts') ?? '').toLowerCase()
+        const text = (element.textContent ?? '').trim()
+        if (!/^(添加工作区|Add workspace)$/i.test(label) && !shortcut.includes('control+o') && !shortcut.includes('meta+o')) return
+        if (/^(添加工作区|Add workspace)\s*[.…]+$/.test(text)) return
+        element.setAttribute('data-dsh-add-chooser', 'true')
+        element.addEventListener('click', onAddClick, true)
+      }
+      const scanRoot = (root) => {
+        if (!root || !root.isConnected) return
+        if (typeof root.matches === 'function' && root.matches('button, [role="button"]')) {
+          processButton(root)
+        }
+        if (typeof root.querySelectorAll === 'function') {
+          for (const element of root.querySelectorAll('button, [role="button"]')) {
+            processButton(element)
+          }
         }
       }
-      const observer = new MutationObserver(scan)
+      const flush = () => {
+        scanTimer = null
+        const roots = [...pendingRoots]
+        pendingRoots.clear()
+        for (const root of roots) scanRoot(root)
+      }
+      const observer = new MutationObserver((mutations) => {
+        let added = false
+        for (const mutation of mutations) {
+          for (const node of mutation.addedNodes) {
+            if (node && node.nodeType === 1) {
+              pendingRoots.add(node)
+              added = true
+            }
+          }
+        }
+        if (!added || scanTimer !== null) return
+        scanTimer = setTimeout(flush, 80)
+      })
       observer.observe(document.body, { childList: true, subtree: true })
-      scan()
+      scanRoot(document.body)
       return () => {
         observer.disconnect()
+        if (scanTimer !== null) clearTimeout(scanTimer)
+        pendingRoots.clear()
         close()
       }
     }
@@ -4419,8 +4506,10 @@ window.__ModuleLoader__.load({
             }
           }
           if (!install()) {
+            let attempts = 0
             timer = setInterval(() => {
-              if (install() && timer) {
+              attempts += 1
+              if ((install() || attempts >= 20) && timer) {
                 clearInterval(timer)
                 timer = null
               }

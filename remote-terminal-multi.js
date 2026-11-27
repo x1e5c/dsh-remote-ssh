@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createRemoteTerminalBackend } from './remote-terminal.js'
@@ -24,47 +24,63 @@ function backendType(record) {
 export function apply(ctx) {
   const backends = new Map()
   let closed = false
+  let inFlight = false
+  let lastStamp = null
 
   const refresh = async () => {
-    if (closed) return
-    let workspaces = {}
+    if (closed || inFlight) return
+    inFlight = true
     try {
-      const parsed = JSON.parse(await readFile(stateFile(ctx), 'utf8'))
-      workspaces = parsed?.workspaces && typeof parsed.workspaces === 'object' ? parsed.workspaces : {}
-    } catch {
-      workspaces = {}
-    }
-    const wanted = new Map()
-    for (const record of Object.values(workspaces)) {
-      if (typeof record?.target !== 'string' || typeof record?.remotePath !== 'string') continue
-      if (!record.remotePath.startsWith('/')) continue
-      const type = backendType(record)
-      if (wanted.has(type)) continue
-      wanted.set(type, {
-        host: record.target,
-        remotePath: record.remotePath,
-        type,
-        sandbox: record.sandbox === 'bwrap' ? 'bwrap' : null,
-      })
-    }
-    for (const [type, dispose] of [...backends]) {
-      if (wanted.has(type)) continue
-      try { await dispose() } catch { /* best effort */ }
-      backends.delete(type)
-    }
-    for (const [type, config] of wanted) {
-      if (backends.has(type)) continue
+      const file = stateFile(ctx)
+      let workspaces = {}
       try {
-        const dispose = ctx.terminals.registerBackend(createRemoteTerminalBackend(config))
-        backends.set(type, dispose)
+        const info = await stat(file)
+        const stamp = `${info.mtimeMs}:${info.size}`
+        if (stamp === lastStamp) return
+        const parsed = JSON.parse(await readFile(file, 'utf8'))
+        lastStamp = stamp
+        workspaces = parsed?.workspaces && typeof parsed.workspaces === 'object' ? parsed.workspaces : {}
       } catch {
-        // duplicate type during reload; retry on the next tick
+        if (lastStamp === 'missing') return
+        lastStamp = 'missing'
+        workspaces = {}
       }
+      const wanted = new Map()
+      for (const record of Object.values(workspaces)) {
+        if (typeof record?.target !== 'string' || typeof record?.remotePath !== 'string') continue
+        if (!record.remotePath.startsWith('/')) continue
+        const type = backendType(record)
+        if (wanted.has(type)) continue
+        wanted.set(type, {
+          host: record.target,
+          remotePath: record.remotePath,
+          type,
+          sandbox: record.sandbox === 'bwrap' ? 'bwrap' : null,
+        })
+      }
+      for (const [type, dispose] of [...backends]) {
+        if (wanted.has(type)) continue
+        try { await dispose() } catch { /* best effort */ }
+        backends.delete(type)
+      }
+      for (const [type, config] of wanted) {
+        if (backends.has(type)) continue
+        try {
+          const dispose = ctx.terminals.registerBackend(createRemoteTerminalBackend(config))
+          backends.set(type, dispose)
+        } catch {
+          // duplicate type during reload; retry on the next tick
+          lastStamp = null
+        }
+      }
+    } finally {
+      inFlight = false
     }
   }
 
   void refresh()
   const timer = setInterval(() => { void refresh() }, 5000)
+  timer.unref?.()
   ctx.effect(() => () => {
     closed = true
     clearInterval(timer)

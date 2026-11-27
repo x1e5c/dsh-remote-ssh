@@ -160,14 +160,36 @@ export function createRemoteFileSystem(config, run = runRemote) {
     return entries
   }
 
+  function parseStatOutput(stdout) {
+    const trimmed = String(stdout ?? '').trim()
+    if (!trimmed) return null
+    const parts = trimmed.split('|')
+    if (parts.length < 3) return null
+    const [kind, sizeText, mtimeText] = parts
+    const size = Number(sizeText)
+    const mtime = Number(mtimeText)
+    const type = kind === 'directory'
+      ? 'directory'
+      : kind === 'symbolic link'
+        ? 'symlink'
+        : 'file'
+    return {
+      version: `${Number.isFinite(mtime) ? mtime : 0}:${Number.isFinite(size) ? size : 0}`,
+      type,
+      size: Number.isFinite(size) ? size : 0,
+    }
+  }
+
   async function writeWhole(path, content, signal) {
     const dir = posix.dirname(path)
+    const quoted = shellQuote(path)
     const encoded = Buffer.from(content, 'utf8').toString('base64')
     const result = await exec(
-      `mkdir -p ${shellQuote(dir)} && base64 -d > ${shellQuote(path)}`,
+      `mkdir -p ${shellQuote(dir)} && base64 -d > ${quoted} && stat -c '%F|%s|%Y' -L -- ${quoted}`,
       { signal, timeoutMs: 60000, stdin: encoded },
     )
     if (result.code !== 0) throw fsError(`cannot write "${path}": ${String(result.stderr ?? '').trim() || `exit ${result.code}`}`, 'FS_IO_ERROR')
+    return parseStatOutput(result.stdout)
   }
 
   async function writeText(target, content, expected, signal) {
@@ -180,8 +202,7 @@ export function createRemoteFileSystem(config, run = runRemote) {
       throw fsError(`cannot overwrite existing "${target.displayPath}" without reading it first`, 'FS_NOT_OBSERVED')
     }
     const before = existing ? await readText(target, signal) : null
-    await writeWhole(target.targetKey, content, signal)
-    const after = await stat(target, signal)
+    const after = (await writeWhole(target.targetKey, content, signal)) ?? (await stat(target, signal))
     return {
       operation: existing ? 'update' : 'create',
       version: after?.version ?? `missing:${target.targetKey}`,
@@ -203,30 +224,34 @@ export function createRemoteFileSystem(config, run = runRemote) {
       throw fsError(`old_string matched ${count} times in "${target.displayPath}"; provide a more specific old_string or set replace_all to true`, 'FS_AMBIGUOUS_EDIT')
     }
     const next = edit.replaceAll ? source.split(edit.oldString).join(edit.newString) : source.replace(edit.oldString, edit.newString)
-    await writeWhole(target.targetKey, next, signal)
-    const after = await stat(target, signal)
+    const after = (await writeWhole(target.targetKey, next, signal)) ?? (await stat(target, signal))
     return {
       version: after?.version ?? `missing:${target.targetKey}`,
       before: source,
-      after: edit.replaceAll ? next : source.replace(edit.oldString, edit.newString),
+      after: next,
     }
   }
 
   async function watch(target, changed, signal) {
     let stopped = false
+    let inFlight = false
     let last = (await stat(target, signal))?.version
+    const intervalMs = Math.max(1000, Number(cfg.watchIntervalMs) || 3000)
     const timer = setInterval(async () => {
-      if (stopped) return
+      if (stopped || inFlight) return
+      inFlight = true
       try {
         const next = (await stat(target, signal))?.version
-        if (next !== last) {
+        if (!stopped && next !== last) {
           last = next
           changed()
         }
       } catch (error) {
-        changed(error)
+        if (!stopped) changed(error)
+      } finally {
+        inFlight = false
       }
-    }, 1000)
+    }, intervalMs)
     timer.unref?.()
     signal?.addEventListener?.('abort', () => {
       stopped = true

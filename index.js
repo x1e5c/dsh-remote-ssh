@@ -56,6 +56,7 @@ export function apply(ctx, config) {
     remoteSessions: (body) => controller.listRemoteSessions(body),
     importRemoteSessions: (body) => controller.importRemoteSessions(body),
     filesList: (body) => controller.listAgentFiles(body),
+    filesStat: (body) => controller.statAgentFile(body),
     filesRead: (body) => controller.readAgentFile(body),
     filesWrite: (body) => controller.writeAgentFile(body),
   }

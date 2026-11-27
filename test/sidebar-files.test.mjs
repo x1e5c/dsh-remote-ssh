@@ -82,6 +82,49 @@ test('remote-fs listDir runs in 1 SSH call with find -H, resolves symlinks via %
   )
 })
 
+test('remote-fs writeText combines write + stat into one SSH call without extra trailing stat', async () => {
+  const scripts = []
+  const fs = createRemoteFileSystem({ host: 'dev', remotePath: '/srv/app' }, async (_cfg, script) => {
+    scripts.push(script)
+    if (script.startsWith('stat -c')) {
+      return { code: 1, stdout: '', stderr: 'No such file or directory' }
+    }
+    if (script.startsWith('mkdir -p') && script.includes('base64 -d >')) {
+      return { code: 0, stdout: 'regular file|5|1700000123\n', stderr: '' }
+    }
+    return { code: 1, stdout: '', stderr: 'unexpected' }
+  })
+  const res = await fs.writeText({ targetKey: '/srv/app/new.txt', displayPath: '/srv/app/new.txt' }, 'hello')
+  assert.equal(res.operation, 'create')
+  assert.equal(res.version, '1700000123:5')
+  // Only 2 SSH calls total: initial stat + combined write-and-stat (no 3rd trailing stat).
+  assert.equal(scripts.length, 2)
+})
+
+test('recordFileSurfaceCall skips local calls and setBoundedCache enforces capacity cap', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-perf-host-'))
+  const controller = makeControllerWithServices(dir)
+  await controller.ready
+
+  // Local workspace call (record = null) is ignored by default.
+  controller.recordFileSurfaceCall('fs.stat', 'C:/local', 'C:/local/a.txt', null)
+  assert.equal(controller.fileSurfaceCalls.length, 0)
+  assert.equal(controller.fileSurfaceCallsTimer, null)
+
+  // Remote call is recorded and debounced rather than writing immediately.
+  controller.recordFileSurfaceCall('read', 'C:/handle', 'notes.txt', { path: 'C:/handle', remotePath: '/srv/app' })
+  assert.equal(controller.fileSurfaceCalls.length, 1)
+  assert.ok(controller.fileSurfaceCallsTimer !== null)
+
+  // Bounded cache evicts oldest entries.
+  const cache = new Map()
+  for (let i = 0; i < 5; i += 1) controller.setBoundedCache(cache, `k${i}`, i, 3)
+  assert.deepEqual([...cache.keys()], ['k2', 'k3', 'k4'])
+
+  await controller.dispose()
+  assert.equal(controller.fileSurfaceCallsTimer, null)
+})
+
 test('workspaceFiles.read uses 1-based offset, exact eof, early-quit sed, and RemoteError on binary/missing', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-sidebar-read-'))
   const workspaceFiles = {
@@ -331,6 +374,7 @@ test('client.js routes workspaceFiles (list/read/readBytes) by sessionId with la
   const source = await readFile(new URL('../client.js', import.meta.url), 'utf8')
   let loadedModule = null
   const apiCalls = []
+  const statCalls = []
   const listCalls = []
   const downloadCalls = []
 
@@ -348,6 +392,16 @@ test('client.js routes workspaceFiles (list/read/readBytes) by sessionId with la
               { workspaceId: 'ws-host-b', target: 'host-b', remotePath: '/root/data', path: 'C:\\Users\\t\\.dsh\\remote-ssh\\agent-workspaces\\bbbb' },
             ],
           }
+        },
+      }
+    }
+    if (url === '/api/remote-ssh/filesStat') {
+      statCalls.push(body)
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { ok: true, path: body.path, type: 'file', size: 1024, version: '100:1024' }
         },
       }
     }
@@ -519,11 +573,23 @@ test('client.js routes workspaceFiles (list/read/readBytes) by sessionId with la
   assert.equal(apiCalls[1].path, '/root/data/src/index.js')
   assert.equal(apiCalls[1].offset, 2)
 
-  // readBytes with baseFile and ../ normalizes cleanly.
-  const bytesRes = await workspaceFilesRemote.readBytes('sess-b', '../assets/logo.png', { baseFile: '/root/data/docs/guide.md' })
+  // readBytes with baseFile, ../, and explicit byte range forwards offset/length to filesDownload.
+  const bytesRes = await workspaceFilesRemote.readBytes('sess-b', '../assets/logo.png', {
+    baseFile: '/root/data/docs/guide.md',
+    range: { offset: 2, length: 2 },
+  })
   assert.equal(bytesRes.ok, true)
   assert.equal(downloadCalls[0].workspaceId, 'ws-host-b')
   assert.equal(downloadCalls[0].path, '/root/data/assets/logo.png')
+  assert.equal(downloadCalls[0].offset, 2)
+  assert.equal(downloadCalls[0].length, 2)
+
+  // stat calls lightweight filesStat rather than filesRead.
+  const statRes = await workspaceFilesRemote.stat('sess-b', 'src/index.js')
+  assert.equal(statRes.ok, true)
+  assert.equal(statRes.value.bytes, 1024)
+  assert.equal(statCalls.length, 1)
+  assert.equal(statCalls[0].path, '/root/data/src/index.js')
 
   // betterSidebar.matchFileViewer is patched while active and restored on cleanup.
   assert.notEqual(betterSidebar.matchFileViewer, originalMatch)

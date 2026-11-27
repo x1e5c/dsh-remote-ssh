@@ -92,7 +92,7 @@ export function runRemote(config, script, options = {}) {
         stdout: Buffer.concat(out).toString('utf8'),
         stderr: Buffer.concat(err).toString('utf8'),
         timedOut,
-        truncated: bytes > MAX_OUTPUT,
+        truncated: bytes > maxOutput,
       })
     })
     if (options.stdin === undefined) child.stdin.end()
