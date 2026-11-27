@@ -72,13 +72,18 @@ window.__ModuleLoader__.load({
         'flow.remoteTitle': '添加远程工作区',
         'flow.remoteSubtitle': '选择 SSH 主机和远程目录即可，不需要选择 preset。',
         'flow.selectHost': '远程机器',
+        'flow.selectHostPlaceholder': '请选择远程机器…',
+        'flow.selectHostPrompt': '请先在上方选择一台远程机器以浏览目录。',
         'flow.filter': '筛选目录…',
         'flow.noMatch': '没有匹配的目录。',
         'flow.creating': '正在创建…',
+        'flow.workspaceName': '工作区名称（可选）',
+        'flow.workspaceNamePlaceholder': '留空默认使用“目录名 @ 主机名”',
         'viewer.remote': '远程文件',
         'viewer.loading': '正在读取远程文件…',
         'viewer.binary': '这是二进制文件，暂不预览。',
-        'viewer.truncated': '只显示前 1000 行；完整内容请用 Remote Files 下载。',
+        'viewer.truncated': '内容较大，仅显示前一部分；完整内容请用远程 read / bash 工具读取。',
+        'viewer.tableTruncated': '表格仅显示前 {rows} 行、前 {columns} 列。',
         'viewer.notRemote': '这个文件不属于远程工作区。',
         'workspace.hosts': 'SSH 主机',
         'workspace.addHost': '添加主机',
@@ -314,13 +319,18 @@ window.__ModuleLoader__.load({
         'flow.remoteTitle': 'Add remote workspace',
         'flow.remoteSubtitle': 'Choose an SSH host and a remote directory. No preset selection is required.',
         'flow.selectHost': 'Remote machine',
+        'flow.selectHostPlaceholder': 'Select a remote machine…',
+        'flow.selectHostPrompt': 'Select a remote machine above to browse its directories.',
         'flow.filter': 'Filter directories…',
         'flow.noMatch': 'No matching directories.',
         'flow.creating': 'Creating…',
+        'flow.workspaceName': 'Workspace name (optional)',
+        'flow.workspaceNamePlaceholder': 'Defaults to “dir @ host” when empty',
         'viewer.remote': 'Remote file',
         'viewer.loading': 'Loading remote file…',
         'viewer.binary': 'Binary file; preview is not available.',
-        'viewer.truncated': 'Showing the first 1000 lines; use Remote files to download the full file.',
+        'viewer.truncated': 'The file is large, so only the beginning is shown. Use the remote read/bash tools for the full content.',
+        'viewer.tableTruncated': 'Showing only the first {rows} rows and {columns} columns.',
         'viewer.notRemote': 'This file does not belong to a remote workspace.',
         'workspace.hosts': 'SSH hosts',
         'workspace.addHost': 'Add host',
@@ -2215,6 +2225,55 @@ window.__ModuleLoader__.load({
       return { text: kept, clamped }
     }
 
+    // CSV / TSV previews: the local sidebar renders tables, so a remote file
+    // opened in our viewer should not fall back to raw text.
+    const MAX_TABLE_ROWS = 500
+    const MAX_TABLE_COLUMNS = 40
+
+    function renderRemoteTable(text, path, t) {
+      const delimiter = /\.csv$/i.test(path) ? ',' : '\t'
+      const lines = String(text ?? '').split(/\r?\n/)
+      while (lines.length > 1 && lines[lines.length - 1] === '') lines.pop()
+      if (lines.length === 0) return h('div', { className: 'rs-hint', style: { padding: 12 } }, '—')
+      const headerCells = lines[0].split(delimiter)
+      const header = headerCells.slice(0, MAX_TABLE_COLUMNS)
+      const rows = lines
+        .slice(1, 1 + MAX_TABLE_ROWS)
+        .map((line) => line.split(delimiter).slice(0, header.length))
+      const cellStyle = {
+        borderBottom: '1px solid var(--dsw-alias-border-l1)',
+        padding: '3px 8px',
+        whiteSpace: 'nowrap',
+        verticalAlign: 'top',
+      }
+      const truncated = lines.length - 1 > rows.length || headerCells.length > header.length
+      return h('div', { style: { flex: 1, minHeight: 0, overflow: 'auto', padding: 8 } },
+        h('table', { style: { borderCollapse: 'collapse', fontSize: 12, minWidth: 'max-content' } },
+          h('thead', null, h('tr', null, header.map((cell, index) => h('th', {
+            key: index,
+            style: {
+              position: 'sticky',
+              top: 0,
+              zIndex: 1,
+              background: 'var(--dsw-alias-bg-layer-1)',
+              borderBottom: '1px solid var(--dsw-alias-border-l2)',
+              padding: '4px 8px',
+              textAlign: 'left',
+              whiteSpace: 'nowrap',
+              fontWeight: 600,
+            },
+          }, cell || ' ')))),
+          h('tbody', null, rows.map((row, rowIndex) => h('tr', { key: rowIndex },
+            header.map((_, columnIndex) => h('td', { key: columnIndex, style: cellStyle }, row[columnIndex] ?? '')),
+          ))),
+        ),
+        truncated
+          ? h('div', { className: 'rs-hint', style: { padding: '6px 4px' } },
+            t('viewer.tableTruncated').replace('{rows}', String(rows.length)).replace('{columns}', String(header.length)))
+          : null,
+      )
+    }
+
     function PanelIcon({ size = 20, active = false }) {
       return h('svg', {
         width: size,
@@ -2285,6 +2344,20 @@ window.__ModuleLoader__.load({
       return stripped.slice(0, index)
     }
 
+    function defaultRemoteWorkspaceTitle(host, remotePath) {
+      const hostLabel = (typeof host?.name === 'string' && host.name.trim() !== ''
+        ? host.name.trim()
+        : typeof host?.target === 'string' && host.target.trim() !== ''
+          ? host.target.trim()
+          : '')
+      if (!hostLabel) return ''
+      const raw = typeof remotePath === 'string' ? remotePath.trim().replace(/\/+$/, '') : ''
+      if (raw === '' || raw === '/') return `/ @ ${hostLabel}`
+      const idx = raw.lastIndexOf('/')
+      const base = idx >= 0 ? raw.slice(idx + 1) : raw
+      return `${base || '/'} @ ${hostLabel}`
+    }
+
     function RemoteDirectoryFlow(props) {
       const { ctx, t, open, onCancel } = props
       const [listing, setListing] = useState(null)
@@ -2292,50 +2365,65 @@ window.__ModuleLoader__.load({
       const [hosts, setHosts] = useState([])
       const [hostId, setHostId] = useState('')
       const [query, setQuery] = useState('')
+      const [customTitle, setCustomTitle] = useState('')
       const [loading, setLoading] = useState(false)
       const [error, setError] = useState(null)
       const [creating, setCreating] = useState(false)
+      const loadSeqRef = useRef(0)
 
       const loadRemote = useCallback(async (id, target) => {
         if (!id) return
+        const seq = ++loadSeqRef.current
         setLoading(true)
         setError(null)
         try {
           const result = await callApi('remoteDirs', { id, path: target || undefined })
+          if (loadSeqRef.current !== seq) return
           setListing(result)
           setPath(result?.path || target || '')
           setQuery('')
         } catch (failure) {
-          setError(errorText(t, failure))
+          if (loadSeqRef.current === seq) setError(errorText(t, failure))
         } finally {
-          setLoading(false)
+          if (loadSeqRef.current === seq) setLoading(false)
         }
       }, [t])
 
       useEffect(() => {
         if (!open) return
         let alive = true
+        loadSeqRef.current += 1
+        setHostId('')
         setListing(null)
+        setPath('')
+        setLoading(false)
         setError(null)
         setQuery('')
+        setCustomTitle('')
         void (async () => {
           try {
             const data = await callApi('list')
             if (!alive) return
             const next = Array.isArray(data.connections) ? data.connections : []
             setHosts(next)
-            const selected = next[0]?.id ?? ''
-            setHostId(selected)
-            if (selected) await loadRemote(selected)
           } catch (failure) {
             if (alive) setError(errorText(t, failure))
           }
         })()
         return () => { alive = false }
-      }, [open, loadRemote, t])
+      }, [open, t])
 
       useEffect(() => {
-        if (!open || !hostId) return
+        if (!open) return
+        if (!hostId) {
+          loadSeqRef.current += 1
+          setListing(null)
+          setPath('')
+          setQuery('')
+          setLoading(false)
+          setError(null)
+          return
+        }
         void loadRemote(hostId)
       }, [hostId, open, loadRemote])
 
@@ -2362,14 +2450,19 @@ window.__ModuleLoader__.load({
         if (hostId) void loadRemote(hostId, target)
       }
 
+      const selectedHost = hosts.find((item) => item.id === hostId) ?? null
+      const suggestedTitle = defaultRemoteWorkspaceTitle(selectedHost, path || listing?.path || '')
+
       const select = async () => {
         if (!hostId || !listing?.path) return
         setCreating(true)
         setError(null)
         try {
+          const trimmedTitle = customTitle.trim()
           const result = await callApi('agentWorkspace', {
             id: hostId,
             remotePath: listing.path,
+            ...(trimmedTitle !== '' ? { title: trimmedTitle } : {}),
           })
           onCancel?.()
           const uiWorkspace = ctx.uiWorkspace
@@ -2406,7 +2499,10 @@ window.__ModuleLoader__.load({
             onChange: (event) => setHostId(event.target.value),
           }, hosts.length === 0
             ? h('option', { value: '' }, t('flow.noHost'))
-            : hosts.map((item) => h('option', { key: item.id, value: item.id }, `${item.name || item.target} · ${item.target}`))),
+            : [
+              h('option', { key: '__placeholder__', value: '' }, t('flow.selectHostPlaceholder')),
+              ...hosts.map((item) => h('option', { key: item.id, value: item.id }, `${item.name || item.target} · ${item.target}`)),
+            ]),
         ),
       ),
       error ? h('div', { className: 'rs-error', style: { marginBottom: 8 } }, error) : null,
@@ -2419,7 +2515,22 @@ window.__ModuleLoader__.load({
             onClick: () => { onCancel?.(); ctx.layout?.selectPanel?.('remote-ssh') },
           }, t('flow.openSSH')),
         )
-        : h(React.Fragment, null,
+        : !hostId
+          ? h(React.Fragment, null,
+            h('div', {
+              className: 'rs-hint',
+              style: { border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 10, minHeight: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, textAlign: 'center' },
+            }, t('flow.selectHostPrompt')),
+            h('div', { className: 'dsh-remote-dialog-footer', style: { margin: '12px -16px -16px', padding: '12px 16px' } },
+              h('div', { className: 'rs-hint', style: { margin: 0, flex: 1, minWidth: 0 } }, t('flow.hint')),
+              h('button', {
+                type: 'button',
+                className: 'rs-btn rs-btn-primary',
+                disabled: true,
+              }, t('flow.select')),
+            ),
+          )
+          : h(React.Fragment, null,
           h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, flexWrap: 'wrap' } },
             h('button', { type: 'button', className: 'rs-btn rs-btn-ghost', onClick: () => navigate(parent), disabled: path === '/' }, t('flow.up')),
             h('div', { className: 'dsh-remote-crumbs' }, crumbs.map((crumb, index) => h(React.Fragment, { key: crumb.path },
@@ -2461,6 +2572,22 @@ window.__ModuleLoader__.load({
               ))),
           ),
           h('div', { className: 'rs-hint', style: { marginTop: 8, wordBreak: 'break-all' } }, path || '/'),
+          h('label', { className: 'rs-field', style: { marginTop: 10 } },
+            h('span', { className: 'rs-label' }, t('flow.workspaceName')),
+            h('input', {
+              className: 'rs-input',
+              value: customTitle,
+              maxLength: 120,
+              onChange: (event) => setCustomTitle(event.target.value),
+              onKeyDown: (event) => {
+                if (event.key === 'Enter' && !loading && !creating && listing?.path && hostId) {
+                  event.preventDefault()
+                  void select()
+                }
+              },
+              placeholder: suggestedTitle || t('flow.workspaceNamePlaceholder'),
+            }),
+          ),
           h('div', { className: 'dsh-remote-dialog-footer', style: { margin: '12px -16px -16px', padding: '12px 16px' } },
             h('div', { className: 'rs-hint', style: { margin: 0, flex: 1, minWidth: 0 } }, t('flow.hint')),
             h('button', {
@@ -3037,8 +3164,159 @@ window.__ModuleLoader__.load({
       }
     }
 
-    function installBetterSidebarFsBridge() {
-      const host = typeof window !== 'undefined' && typeof window.fetch === 'function'
+    // dsh-better-sidebar's markdown / html viewers read the document through
+    // `fs.read` / `fs.readPage`; for a remote workspace those hit the local
+    // handle directory. Bridge both methods (and keep the rich read-only
+    // renderers for md/html) so remote previews match local ones instead of
+    // falling through to our plain-text viewer.
+    const SIDEBAR_DELEGATED_VIEWER_EXTS = new Set(['md', 'markdown', 'html', 'htm'])
+    const SIDEBAR_READ_LIMIT_BYTES = 4 * 1024 * 1024
+    const SIDEBAR_PAGE_BYTES = 256 * 1024
+    const SIDEBAR_READ_METHODS = new Set(['fs.read', 'fs.readPage'])
+
+    function remoteFileExtension(path) {
+      const match = /\.([a-z0-9]+)$/i.exec(String(path ?? ''))
+      return match ? match[1].toLowerCase() : ''
+    }
+
+    function base64Bytes(bytes) {
+      let binary = ''
+      const head = bytes.subarray(0, 4096)
+      for (let index = 0; index < head.length; index += 1) {
+        binary += String.fromCharCode(head[index])
+      }
+      return typeof btoa === 'function' ? btoa(binary) : ''
+    }
+
+    async function sidebarReadTarget(payload) {
+      const cwd = typeof payload?.cwd === 'string' ? payload.cwd : ''
+      const requested = typeof payload?.path === 'string' ? payload.path : ''
+      if (requested === '') return null
+      const absolute = absoluteLocalPath(requested, cwd)
+      if (absolute === '') return null
+      let workspaces
+      try {
+        workspaces = await loadNativeWorkspaces()
+      } catch {
+        return null
+      }
+      const target = remoteListingTarget(absolute, workspaces)
+      return target ? { target, requested } : null
+    }
+
+    async function bridgeSidebarRead(method, init) {
+      if (typeof init?.body !== 'string') return null
+      let payload
+      try {
+        payload = JSON.parse(init.body)
+      } catch {
+        return null
+      }
+      if (!payload || typeof payload !== 'object') return null
+      const resolved = await sidebarReadTarget(payload)
+      if (!resolved) return null
+      const { target, requested } = resolved
+      const signal = init.signal ?? undefined
+      try {
+        signal?.throwIfAborted?.()
+        const info = await callApi('filesStat', { workspaceId: target.workspaceId, path: target.remotePath }, { signal })
+        if (info?.type === 'directory') {
+          return sidebarJsonResponse({
+            ok: false,
+            error: { code: 'fs-directory', message: `"${requested}" is a directory` },
+          }, 400)
+        }
+        const size = Number(info?.size) || 0
+        if (method === 'fs.readPage') {
+          const offset = Number.isInteger(payload.offset) && payload.offset >= 0 ? payload.offset : 0
+          const page = await fetchRemoteFileBlob(target.workspaceId, target.remotePath, signal, {
+            offset,
+            length: SIDEBAR_PAGE_BYTES,
+          })
+          const bytes = new Uint8Array(await page.blob.arrayBuffer())
+          let text = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
+          let nextOffset = Math.min(size, offset + bytes.length)
+          let eof = nextOffset >= size
+          if (!eof) {
+            // Hand back whole lines only: the reference viewer assumes the tail
+            // of a page is a complete line.
+            const lastBreak = text.lastIndexOf('\n')
+            if (lastBreak >= 0) {
+              text = text.slice(0, lastBreak + 1)
+              nextOffset = Math.min(size, offset + new TextEncoder().encode(text).length)
+            }
+          }
+          return sidebarJsonResponse({
+            ok: true,
+            value: { kind: 'text', text, offset, nextOffset, eof, size, encoding: 'utf-8' },
+          })
+        }
+        if (size > SIDEBAR_READ_LIMIT_BYTES) {
+          const head = await fetchRemoteFileBlob(target.workspaceId, target.remotePath, signal, {
+            offset: 0,
+            length: 4096,
+          })
+          const bytes = new Uint8Array(await head.blob.arrayBuffer())
+          return sidebarJsonResponse({
+            ok: true,
+            value: { kind: 'too-large', size, head: base64Bytes(bytes), reason: 'bytes' },
+          })
+        }
+        const whole = await fetchRemoteFileBlob(target.workspaceId, target.remotePath, signal, {
+          maxBytes: SIDEBAR_READ_LIMIT_BYTES,
+        })
+        const bytes = new Uint8Array(await whole.blob.arrayBuffer())
+        if (bytes.subarray(0, 8192).includes(0)) {
+          return sidebarJsonResponse({
+            ok: true,
+            value: { kind: 'binary', size, head: base64Bytes(bytes) },
+          })
+        }
+        return sidebarJsonResponse({
+          ok: true,
+          value: { kind: 'text', content: new TextDecoder('utf-8', { fatal: false }).decode(bytes), size },
+        })
+      } catch (failure) {
+        return sidebarJsonResponse({
+          ok: false,
+          error: { code: 'remote-ssh-bridge', message: failure instanceof Error ? failure.message : String(failure) },
+        }, 502)
+      }
+    }
+
+    // A remote preview is read-only: let better-sidebar's own write routes reach
+    // the local handle directory would silently write the wrong file.
+    async function remoteSidebarWriteTarget(url, init) {
+      let localPath = ''
+      try {
+        const parsed = new URL(url, 'http://local')
+        if (/\/sidebar\/(?:write|upload)$/.test(parsed.pathname)) {
+          localPath = parsed.pathname.endsWith('/upload')
+            ? (parsed.searchParams.get('dir') ?? '')
+            : (parsed.searchParams.get('path') ?? '')
+        } else if (parsed.pathname.includes('/sidebar/api/')) {
+          const method = parsed.pathname.split('/sidebar/api/')[1] ?? ''
+          if (!/^fs\.(?:write|rename|remove|mkdir|createFile)$/.test(method)) return null
+          if (typeof init?.body !== 'string') return null
+          const payload = JSON.parse(init.body)
+          localPath = typeof payload?.path === 'string' ? payload.path : ''
+        } else {
+          return null
+        }
+      } catch {
+        return null
+      }
+      if (localPath === '') return null
+      let workspaces
+      try {
+        workspaces = await loadNativeWorkspaces()
+      } catch {
+        return null
+      }
+      return remoteListingTarget(localPath, workspaces) ? localPath : null
+    }
+
+    function installBetterSidebarFsBridge() {      const host = typeof window !== 'undefined' && typeof window.fetch === 'function'
         ? window
         : (typeof globalThis !== 'undefined' && typeof globalThis.fetch === 'function' ? globalThis : null)
       if (!host) return () => {}
@@ -3049,11 +3327,26 @@ window.__ModuleLoader__.load({
           const url = typeof input === 'string'
             ? input
             : input instanceof URL ? input.href : input?.url
-          if (typeof url === 'string' && url.includes('/sidebar/api/')) {
-            const method = url.split('/sidebar/api/')[1]?.split(/[?#]/)[0]
-            if (method === 'fs.tree' || method === 'fs.trees') {
-              const response = await bridgeSidebarListing(method, init)
-              if (response) return response
+          if (typeof url === 'string') {
+            const blocked = await remoteSidebarWriteTarget(url, init)
+            if (blocked) {
+              return sidebarJsonResponse({
+                ok: false,
+                error: {
+                  code: 'forbidden',
+                  message: `"${blocked}" is a remote file; remote previews are read-only. Edit it with the remote fs tools.`,
+                },
+              }, 403)
+            }
+            if (url.includes('/sidebar/api/')) {
+              const method = url.split('/sidebar/api/')[1]?.split(/[?#]/)[0]
+              if (method === 'fs.tree' || method === 'fs.trees') {
+                const response = await bridgeSidebarListing(method, init)
+                if (response) return response
+              } else if (SIDEBAR_READ_METHODS.has(method)) {
+                const response = await bridgeSidebarRead(method, init)
+                if (response) return response
+              }
             }
           }
         } catch {
@@ -3474,7 +3767,9 @@ window.__ModuleLoader__.load({
               )
               : state.binary
                 ? h('div', { className: 'rs-hint', style: { padding: 12 } }, t('viewer.binary'))
-                : h(React.Fragment, null,
+                : /\.(tsv|csv)$/i.test(String(state.remotePath || path))
+                  ? renderRemoteTable(state.text, String(state.remotePath || path), t)
+                  : h(React.Fragment, null,
                   h('pre', {
                     style: { margin: 0, padding: 12, flex: 1, minHeight: 0, overflow: 'auto', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, lineHeight: 1.55, whiteSpace: 'pre', tabSize: 4 },
                   }, state.text),
@@ -4144,8 +4439,15 @@ window.__ModuleLoader__.load({
             if (service.matchFileViewer.__dshRemoteSsh) return true
             const original = service.matchFileViewer
             const wrapped = function (path, head) {
-              if (isRemoteMirrorPath(path)) return descriptor
-              return original.call(this, path, head)
+              if (!isRemoteMirrorPath(path)) return original.call(this, path, head)
+              // Rich read-only renderers keep their native implementation: the
+              // bridged fs.read above feeds them the remote bytes, so markdown
+              // and html previews look like local ones instead of raw text.
+              if (SIDEBAR_DELEGATED_VIEWER_EXTS.has(remoteFileExtension(path))) {
+                const match = original.call(this, path, head)
+                return match == null ? descriptor : match
+              }
+              return descriptor
             }
             wrapped.__dshRemoteSsh = true
             try {

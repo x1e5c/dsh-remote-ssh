@@ -448,11 +448,12 @@ test('client.js routes workspaceFiles (list/read/readBytes) by sessionId with la
     }
     if (url === '/api/remote-ssh/filesDownload') {
       downloadCalls.push(body)
-      const bytes = new Uint8Array([1, 2, 3, 4])
+      const text = body.path.endsWith('.md') ? '# Title\n\nhello\n' : 'abcd'
+      const bytes = new TextEncoder().encode(text)
       return {
         ok: true,
         status: 200,
-        headers: { get: (k) => (k === 'x-remote-file-size' ? '4' : null) },
+        headers: { get: (k) => (k === 'x-remote-file-size' ? String(bytes.length) : null) },
         async blob() {
           return { size: bytes.length, async arrayBuffer() { return bytes.buffer } }
         },
@@ -471,6 +472,11 @@ test('client.js routes workspaceFiles (list/read/readBytes) by sessionId with la
     queueMicrotask,
     Uint8Array,
     Response,
+    URL,
+    TextDecoder,
+    TextEncoder,
+    btoa,
+    atob,
     CustomEvent: class CustomEvent { constructor(type, init) { this.type = type; this.detail = init?.detail } },
     window: {
       __ModuleLoader__: { load(def) { loadedModule = def } },
@@ -505,7 +511,9 @@ test('client.js routes workspaceFiles (list/read/readBytes) by sessionId with la
     async readBytes() { return { ok: false, error: { code: 'local-fallback' } } },
     async stat() { return { ok: false, error: { code: 'local-fallback' } } },
   }
-  const originalMatch = () => null
+  const originalMatch = (path) => (/\.(md|markdown|html|htm)$/i.test(path)
+    ? { id: 'markdown', exts: ['md'], fetchStrategy: 'fsRead' }
+    : null)
   const betterSidebar = { matchFileViewer: originalMatch }
   const clientServices = {
     remote: { workspaceFiles: workspaceFilesRemote },
@@ -629,6 +637,36 @@ test('client.js routes workspaceFiles (list/read/readBytes) by sessionId with la
     }),
     /unexpected fetch/,
   )
+
+  // dsh-better-sidebar's markdown/html viewers read through fs.read; that call
+  // must be bridged too, and those formats must keep the native renderer.
+  const readResponse = await sandbox.fetch('/sidebar/api/fs.read', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionId: 'sess-b', cwd: rootLocal, path: `${rootLocal}\\README.md` }),
+  })
+  const readEnvelope = await readResponse.json()
+  assert.equal(readEnvelope.ok, true)
+  assert.equal(readEnvelope.value.kind, 'text')
+  assert.match(readEnvelope.value.content, /hello/)
+
+  // md/html are delegated to the native renderer; other formats stay on the
+  // remote viewer. A LOCAL md path also keeps the native renderer untouched.
+  assert.equal(betterSidebar.matchFileViewer(`${rootLocal}\\README.md`)?.id, 'markdown')
+  assert.equal(betterSidebar.matchFileViewer(`${rootLocal}\\page.html`)?.id, 'markdown')
+  assert.equal(betterSidebar.matchFileViewer(`${rootLocal}\\data.csv`)?.id, 'dsh-remote-ssh:mirror-file')
+  assert.equal(betterSidebar.matchFileViewer('C:\\local\\notes.md')?.id, 'markdown')
+
+  // The sidebar's own write route is refused for remote paths (it would write
+  // the local handle file, not the remote one).
+  const writeResponse = await sandbox.fetch(
+    `/sidebar/write?sessionId=sess-b&path=${encodeURIComponent(`${rootLocal}\\README.md`)}`,
+    { method: 'POST', body: '# changed' },
+  )
+  assert.equal(writeResponse.status, 403)
+  const writeEnvelope = await writeResponse.json()
+  assert.equal(writeEnvelope.ok, false)
+  assert.equal(writeEnvelope.error.code, 'forbidden')
 
   // betterSidebar.matchFileViewer is patched while active and restored on cleanup.
   assert.notEqual(betterSidebar.matchFileViewer, originalMatch)

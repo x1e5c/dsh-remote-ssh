@@ -50,7 +50,7 @@ export function apply(ctx, config) {
     detectSandbox: (body) => controller.detectSandboxHost(body),
     sandboxLog: (body) => controller.readSandboxLog(body),
     remove: (body) => controller.remove(requireId(body)),
-    agentWorkspace: (body) => controller.createAgentWorkspace(requireId(body), body?.remotePath, body?.mode),
+    agentWorkspace: (body) => controller.createAgentWorkspace(requireId(body), body?.remotePath, body?.mode, body?.title),
     agentWorkspaces: () => ({ workspaces: controller.listAgentWorkspaces() }),
     remoteDirs: (body) => controller.listRemoteDirs(body),
     remoteSessions: (body) => controller.listRemoteSessions(body),
